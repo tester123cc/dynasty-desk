@@ -10,13 +10,13 @@ Single-file static web app (`index.html`) served by GitHub Pages at tester123cc.
 ## Layout
 - `index.html`: the whole app (CSS, JS, embedded snapshot data). The 2027 rookie board is a second single-file page embedded as the string `RB27_HTML` in a persistent iframe; parent and child talk by `postMessage` (`dd-live`, `rb27-ready`, `rb27-h`, `rb27-haul`/`dd-haul`).
 - `scripts/fetch-data.mjs`: nightly values job. `scripts/crawl-trades.mjs`: market trades from KeepTradeCut's trade database. Workflow: `.github/workflows/data.yml`, daily plus manual dispatch. Outputs `data/values.json`, `data/history.json`, `data/market-trades.json`.
-- Rookie board sources live in `/home/claude/rb27` in cloud sessions only (not in the repo); re-extract the board from `RB27_HTML` if you need to edit it.
+- Rookie board sources live in `/home/claude/rb27` in cloud sessions only (not in the repo). To edit the board, use `scripts/rb27.py` (`out` to a file, edit, `in` to re-embed; it handles the string escaping).
 
 ## Key internals
 - Values: DynastyProcess CSV + FantasyCalc (per-league ppr/numQbs) + KeepTradeCut, blended by `S.weights`; `adj = value*mult*ageF*modeF`. `mv(p,L)` is market value without age discount (used for trade grading). KeepTradeCut's rankings page now keeps players in `<script id="ktc-players">` JSON; `parseKTC` reads that first (same code in `scripts/fetch-data.mjs`). Browsers can't fetch KeepTradeCut (CORS), so the app uses the nightly copy in `data/values.json` when it is under 48h old. Missing player ages are filled from Sleeper birth dates (`BDX`, `applyBD`).
 - Offers: `makeOffers`/`makeSells`, tuned by `learnTrades(L)` (league trades plus market trades). Pending trades: `PENDING`, `pendCard`; Sleeper may not return proposals.
 - Draft order: `projOrder(lg)` runs 1,000 season sims (drives My picks slots); falls back to `draftOrder` (today's order, used by Home and Roster). The "Projected final draft order" card runs its own 700-sim `projSim`. Odds and projections are cached by `VER`, which bumps when injuries/teams load, so they recompute once that data arrives. Pick ids: `pk_<lg>_<round>_<origRoster>[_yy]`.
-- Trend arrows: `loadVHist` merges `data/history-weekly.json` (weekly DynastyProcess backfill from its git history, made once by `scripts/backfill-history.py`) with the nightly `data/history.json` (nightly wins on shared dates). `vtrend` compares a player's latest expert value with ~4 weeks earlier (1 week if that is all there is); `tarr(id)` draws ▲/▼ at 8%+ and 150+ points, double at 20%+ and 400+. Arrows sit next to every `ibx()` injury tag and on the value board; Roster has a Rising and falling card. Expert values only (history stores DynastyProcess, not the blend).
+Re-rank rookies after the April NFL draft; refresh rookie rankings (they go stale weekly; Dynasty Nerds only publishes a top 25).
 - Market tab: `pMarket`, `mktItem`, `mktRows`; KeepTradeCut ppr codes 1=0, 2=.5, 3=1, 4=tiered; tep 0-3.
 
 ## Working rules
@@ -26,7 +26,7 @@ Single-file static web app (`index.html`) served by GitHub Pages at tester123cc.
 - KeepTradeCut has no public API. We read its trade-database page's own POST (`/dynasty/trade-database/trades`). Call it at most daily and do not hammer it.
 
 ## Roadmap (not done)
-Live Sleeper draft sync; re-rank rookies after the April NFL draft; refresh rookie rankings (they go stale weekly; Dynasty Nerds only publishes a top 25).
+Re-rank rookies after the April NFL draft; refresh rookie rankings (they go stale weekly; Dynasty Nerds only publishes a top 25).
 
 ## Status as of Nov 20, 2026 (checked on the live site)
 - Live Sleeper sync works (week 11; Boo Boo Baby 17 trades, The Flight Log 5). Pending trades did not show up in either league, so Sleeper likely does not return proposals; the Builder grade is the dependable path.
