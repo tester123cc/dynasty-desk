@@ -17,6 +17,7 @@ Single-file static web app (`index.html`) served by GitHub Pages at tester123cc.
 - Offers: `makeOffers`/`makeSells`, tuned by `learnTrades(L)` (league trades plus market trades). Pending trades: `PENDING`, `pendCard`; Sleeper may not return proposals.
 - Draft order: `projOrder(lg)` runs 1,000 season sims (drives My picks slots); falls back to `draftOrder` (today's order, used by Home and Roster). The "Projected final draft order" card runs its own 700-sim `projSim`. Odds and projections are cached by `VER`, which bumps when injuries/teams load, so they recompute once that data arrives. Pick ids: `pk_<lg>_<round>_<origRoster>[_yy]`.
 - Live draft sync (v7.14): `drFind` looks for the 2027 rookie draft in the league's drafts and in its 2027 renewal (`/user/<id>/leagues/nfl/2027` where `previous_league_id` matches; renewals get a new league id). `drPoll`/`drTick` poll `/draft/<id>`, `/picks` and `/traded_picks`: every 8s while drafting, 60s paused, 30s within 3h of a scheduled start, else 5 min; slower when the tab is hidden; restarted after each Sleeper sync. `drPayload` goes to the board as `dd-draft`; the board matches names with `nkey` (drops Jr/Sr/II), makes `x_` stub players for picks not on the board, stores it in `S.sl`, and shows it on Draft day (`vSync`), Board (taken tags) and Mock ("Start from the live draft"). Once Sleeper has a draft order, `dd-live` sends that order and snake setting. Test without a live draft: load `tests/draft-harness.js` in the page and call `__setupFake({...})`, which fakes only the draft endpoints behind `jget`.
+- Trend arrows: `loadVHist` merges `data/history-weekly.json` (weekly DynastyProcess backfill from its git history, made once by `scripts/backfill-history.py`) with the nightly `data/history.json` (nightly wins on shared dates). `vtrend` compares a player's latest expert value with ~4 weeks earlier (1 week if that is all there is); `tarr(id)` draws ▲/▼ at 8%+ and 150+ points, double at 20%+ and 400+. Arrows sit next to every `ibx()` injury tag and on the value board; Roster has a Rising and falling card. Expert values only (history stores DynastyProcess, not the blend).
 - Market tab: `pMarket`, `mktItem`, `mktRows`; KeepTradeCut ppr codes 1=0, 2=.5, 3=1, 4=tiered; tep 0-3.
 
 ## Working rules
@@ -26,7 +27,7 @@ Single-file static web app (`index.html`) served by GitHub Pages at tester123cc.
 - KeepTradeCut has no public API. We read its trade-database page's own POST (`/dynasty/trade-database/trades`). Call it at most daily and do not hammer it.
 
 ## Roadmap (not done)
-Re-rank rookies after the April NFL draft; trend arrows from `data/history.json`; refresh rookie rankings (they go stale weekly; Dynasty Nerds only publishes a top 25).
+Re-rank rookies after the April NFL draft; refresh rookie rankings (they go stale weekly; Dynasty Nerds only publishes a top 25).
 
 ## Status as of Nov 20, 2026 (checked on the live site)
 - Live Sleeper sync works (week 11; Boo Boo Baby 17 trades, The Flight Log 5). Pending trades did not show up in either league, so Sleeper likely does not return proposals; the Builder grade is the dependable path.
