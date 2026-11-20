@@ -78,6 +78,7 @@ h1,h2{margin:0}
 .grow{flex:1;min-width:0}.grow small{color:var(--mute)}
 .ar{flex:none;text-align:right}
 .up{color:var(--turf);font-weight:700;font-size:13px}.dn{color:var(--bad);font-weight:700;font-size:13px}
+.tr{font-size:12px;font-weight:700;margin-left:6px;white-space:nowrap}.tr.up{color:var(--turf)}.tr.dn{color:var(--bad)}
 .divider{font:700 11px Barlow,sans-serif;letter-spacing:.09em;text-transform:uppercase;color:var(--mute);margin:12px 0 0;padding-top:10px;border-top:1px solid var(--line)}
 .back{display:flex;align-items:center;gap:12px;margin:6px 0 12px}.back h2{font:700 24px "Barlow Condensed","Arial Narrow",sans-serif;letter-spacing:0;text-transform:none;color:var(--ink)}
 details.card>summary{font:700 12px Barlow,sans-serif;letter-spacing:.09em;text-transform:uppercase;color:var(--mute);cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center}
@@ -311,6 +312,21 @@ function applyMarket(lg){
  recompute()}
 function loadVals(){try{const V=JSON.parse(localStorage.getItem("dd2vals"));if(V&&V.dp){mergeValues(V);VALINFO="live "+new Date(V.t).toLocaleString()+" (saved"+(V.dd?", experts dated "+V.dd:"")+")";applyMarket(S.trade.league||"A");build()}}catch(e){}}
 const trendTxt=p=>p.tr?" · 30d "+(p.tr>0?"+":"")+Math.round(p.tr):"";
+/* ---------- expert value trends: data/history.json (nightly) + data/history-weekly.json (weekly backfill) ---------- */
+let VHIST=null;
+function loadVHist(){if(VHIST)return;VHIST={rows:[]};const h=Math.floor(Date.now()/36e5);
+ Promise.all(["data/history-weekly.json","data/history.json"].map(f=>fetch(f+"?"+h).then(r=>r.ok?r.json():{rows:[]}).catch(()=>({rows:[]})))).then(([w,n])=>{const m={};(w.rows||[]).forEach(r=>{m[r.d]=r});(n.rows||[]).forEach(r=>{m[r.d]=r});
+  VHIST={rows:Object.values(m).filter(r=>r&&r.d&&r.v).sort((a,b)=>a.d<b.d?-1:1),ok:1};VER++;try{render()}catch(e){}})}
+const dDays=(a,b)=>(Date.parse(a)-Date.parse(b))/864e5;
+/* change in expert value over ~4 weeks (falls back to ~1 week while history is short) */
+function vtrend(p){if(!p||p.pos==="PICK"||!p.name||!VHIST||!VHIST.ok)return null;return memo("vt|"+p.id,()=>{const k=pkey(p.name),R=VHIST.rows;
+ let li=-1;for(let i=R.length-1;i>=0;i--)if(R[i].v[k]!=null){li=i;break}if(li<0)return null;const L=R[li],cur=L.v[k];
+ const at=days=>{for(let i=li-1;i>=0;i--){const dd=dDays(L.d,R[i].d);if(dd>days+10)break;if(dd>=days&&R[i].v[k]!=null)return{v:R[i].v[k],d:R[i].d}}return null};
+ const w4=at(27),w1=at(6),b=w4||w1;if(!b)return null;const ch=cur-b.v;
+ return{cur,ch,pc:b.v?ch/b.v:0,from:b.v,since:b.d,span:w4?"4 weeks":"1 week",w1:w1?cur-w1.v:null}})}
+const trendLvl=t=>!t||Math.abs(t.ch)<150||Math.abs(t.pc)<.08?0:Math.abs(t.pc)>=.2&&Math.abs(t.ch)>=400?2:1;
+function tarr(id){const p=byId(id),t=vtrend(p),l=trendLvl(t);if(!l)return"";const up=t.ch>0,a=up?"\u25B2":"\u25BC";
+ return` <span class="tr ${up?"up":"dn"}" title="Expert value ${up?"up":"down"} ${Math.round(Math.abs(t.pc)*100)}% over ${t.span} (${fmt(t.from)} to ${fmt(t.cur)})" aria-label="Expert value ${up?"up":"down"} ${Math.round(Math.abs(t.pc)*100)} percent over ${t.span}">${l===2?a+a:a}${Math.round(Math.abs(t.pc)*100)}%</span>`}
 let INJ={};try{INJ=JSON.parse(localStorage.getItem("dd2inj"))||{}}catch(e){}
 /* birth dates from Sleeper for players our value sources list without an age */
 let BDX={};try{BDX=JSON.parse(localStorage.getItem("dd2bd"))||{}}catch(e){}
@@ -548,7 +564,7 @@ function sheetWho(){const lgs=S.leagues;
  lgs.map(l=>{const cur=(ROST[l.id]||[]).find(t=>t.me);return`<h2 class="card" style="box-shadow:none;padding:10px 0 0;margin:6px 0 0">${esc(l.name)}</h2><button class="pr" data-act="setme" data-lg="${l.id}" data-n="0"><span>View only</span><b>${cur?"":"✓"}</b></button>`+(ROST[l.id]||[]).map(t=>`<button class="pr" data-act="setme" data-lg="${l.id}" data-n="${t.n}"><span>${esc(tn(l.id,t.n))}<br><small>${qb1(l.id,t.n)?esc(qb1(l.id,t.n))+" · ":""}${t.rec}</small></span><b>${cur&&cur.n===t.n?"✓":""}</b></button>`).join("")}).join("")}
 function pickList(){const {L,R,me}=C(),T=S.trade,k=UI.sheet.k,par=R.find(t=>t.n===T.partner),own=k==="give"?me:par;
  const ids=(own?own.p:[]).filter(id=>byId(id)&&!T[k].includes(id)&&(UI.pf==="ALL"||(UI.pf==="Picks")===(byId(id).pos==="PICK"))&&(!UI.pq||pname(id).toLowerCase().includes(UI.pq))).sort((a,b)=>adj(byId(b),L)-adj(byId(a),L));
- return ids.map(id=>{const p=byId(id);return`<button class="pr" data-act="addp" data-id="${id}"><span>${esc(pname(id))}${ibx(id)}<br><small>${pinfo(p)}</small></span><b class="val">${fmt(adj(p,L))}</b></button>`}).join("")||'<p class="note">Nothing to show.</p>'}
+ return ids.map(id=>{const p=byId(id);return`<button class="pr" data-act="addp" data-id="${id}"><span>${esc(pname(id))}${ibx(id)}${tarr(id)}<br><small>${pinfo(p)}</small></span><b class="val">${fmt(adj(p,L))}</b></button>`}).join("")||'<p class="note">Nothing to show.</p>'}
 function sheetPick(){const {L,R}=C(),T=S.trade,k=UI.sheet.k,par=R.find(t=>t.n===T.partner);
  return`<div class="sh"><b>${k==="give"?"You give":"You get from "+esc(par?tn(L.id,par.n):"")}</b><button class="btn sm" data-act="close">Done</button></div>
  <input data-inp="pq" placeholder="Search" value="${esc(UI.pq)}" autocomplete="off">
@@ -585,20 +601,23 @@ function pHome(){const {L,R,me}=C();
 function pLineup(){const {L,R,me}=C();if(!me)return empty("Choose your team first.","Choose team","who");
  const lu=lineup(me.p,L,SLOTS[L.id]),used=new Set(lu.filter(x=>x[1]).map(x=>x[1].p.id));
  const bench=me.p.map(byId).filter(p=>p&&p.pos!=="PICK"&&!used.has(p.id)).sort((a,b)=>adj(b,L)-adj(a,L));
- return`<div class="card"><h2>Starting lineup</h2>${lu.map(([s,x])=>x?`<div class="li"><div class="nm"><span class="slot">${s}</span>${esc(x.p.name)}${ibx(x.p.id)}<br><small style="margin-left:46px">${pinfo(x.p)}${trendTxt(x.p)}</small></div><span class="val">${fmt(x.v)}</span></div>`:`<div class="li"><div class="nm"><span class="slot">${s}</span><span class="tag bad">Empty</span></div></div>`).join("")}</div>
- <div class="card"><h2>Bench <span class="cnt">${bench.length}</span></h2>${bench.map(p=>`<div class="li"><div class="nm">${esc(p.name)}${ibx(p.id)}<br><small>${pinfo(p)}${trendTxt(p)}</small></div><span class="val">${fmt(adj(p,L))}</span></div>`).join("")||'<p class="note">No bench players.</p>'}</div>`}
+ return`<div class="card"><h2>Starting lineup</h2>${lu.map(([s,x])=>x?`<div class="li"><div class="nm"><span class="slot">${s}</span>${esc(x.p.name)}${ibx(x.p.id)}${tarr(x.p.id)}<br><small style="margin-left:46px">${pinfo(x.p)}${trendTxt(x.p)}</small></div><span class="val">${fmt(x.v)}</span></div>`:`<div class="li"><div class="nm"><span class="slot">${s}</span><span class="tag bad">Empty</span></div></div>`).join("")}</div>
+ <div class="card"><h2>Bench <span class="cnt">${bench.length}</span></h2>${bench.map(p=>`<div class="li"><div class="nm">${esc(p.name)}${ibx(p.id)}${tarr(p.id)}<br><small>${pinfo(p)}${trendTxt(p)}</small></div><span class="val">${fmt(adj(p,L))}</span></div>`).join("")||'<p class="note">No bench players.</p>'}</div>`}
 function pRoster(){const {L,R,me}=C();if(!me)return empty("Choose your team first.","Choose team","who");
  S.block=S.block||{};const bl=S.block[L.id]=S.block[L.id]||[],wt=S.watch||[],pr=posRows(L,R);
  const all=me.p.map(byId).filter(Boolean),np=all.filter(p=>p.pos!=="PICK"),low=new Set(np.slice().sort((a,b)=>adj(a,L)-adj(b,L)).slice(0,6).map(p=>p.id));
  const ord=draftOrder(L.id);
+ const mv=np.map(p=>({p,t:vtrend(p)})).filter(x=>trendLvl(x.t)),ri=mv.filter(x=>x.t.ch>0).sort((a,b)=>b.t.pc-a.t.pc).slice(0,3),fa=mv.filter(x=>x.t.ch<0).sort((a,b)=>a.t.pc-b.t.pc).slice(0,3);
+ const mvRow=x=>`<div class="li"><div class="nm">${esc(x.p.name)}${tarr(x.p.id)}<br><small>${pinfo(x.p)} · expert value ${fmt(x.t.from)} to ${fmt(x.t.cur)} since ${new Date(x.t.since+"T12:00").toLocaleDateString([],{month:"short",day:"numeric"})}</small></div></div>`;
+ const movers=VHIST&&VHIST.ok?`<details class="card" ${ri.length||fa.length?"open":""}><summary>Rising and falling</summary>${ri.length||fa.length?(ri.length?`<h3 style="margin-top:8px">Rising</h3>${ri.map(mvRow).join("")}`:"")+(fa.length?`<h3 style="margin-top:8px">Falling</h3>${fa.map(mvRow).join("")}`:""):'<p class="note">Nobody on your roster moved 8% or more.</p>'}<p class="note">\u25B2\u25BC next to a name: expert value (DynastyProcess) changed 8% or more over about 4 weeks; a double arrow is 20% or more. Hover or long-press for the numbers.</p></details>`:"";
  const tags=p=>{const t=[];if(p.pos==="PICK")return"";if(LIVEON&&p.nsrc===1&&p.value>=1000)t.push(["warn","1 source"]);else if(p.dis>=.35&&p.value>=1500)t.push(["warn","Sources differ"]);if(gapOf(p)>=.15&&p.value>=1500)t.push(["warn","Sell high"]);if(CLIFF[p.pos]&&p.age>=CLIFF[p.pos]-1&&p.value>=1000)t.push(["warn","Aging"]);
   if(low.has(p.id)){if(p.age&&p.age<=24)t.push(["good","Stash"]);else if(p.age>=29||adj(p,L)<400)t.push(["bad","Cut?"])}return t.map(([c,x])=>`<span class="tag ${c}">${x}</span>`).join(" ")};
  const need=pos=>pr.rows.filter(r=>r.t.n!==me.n).map(r=>({t:r.t,x:pr.pc(r,pos)})).filter(o=>o.x<=-15).sort((a,b)=>a.x-b.x).slice(0,3);
  const row=p=>{const w=wt.includes(p.id),b=bl.includes(p.id);let sub=pinfo(p)+trendTxt(p);
   if(p.pos==="PICK"&&ord){const k=/^pk_\w_(\d)_(\d+)$/.exec(p.id);if(k)sub="Slot "+slotLab((+k[1]-1)*12+ord.indexOf(+k[2]))+" today"}
   const n=b&&p.pos!=="PICK"?need(p.pos):[];
-  return`<div class="li"><div class="nm">${esc(pname(p.id))}${ibx(p.id)} ${tags(p)}<br><small>${sub}</small>${b&&p.pos!=="PICK"?`<br><small>${n.length?"Teams short at "+p.pos+": "+n.map(o=>esc(tn(L.id,o.t.n))).join(", "):"No team is clearly short at "+p.pos}</small>`:""}</div><div class="acts"><button class="mini ${w?"on":""}" data-act="watch" data-id="${p.id}" aria-label="Watch">${w?"★":"☆"}</button><button class="mini ${b?"on":""}" data-act="blk" data-id="${p.id}">${b?"On block":"Block"}</button><span class="val">${fmt(adj(p,L))}</span></div></div>`};
- return["QB","RB","WR","TE","PICK"].map(pos=>{const g=all.filter(p=>p.pos===pos).sort((a,b)=>adj(b,L)-adj(a,L));return g.length?`<div class="card"><h2>${pos==="PICK"?"Picks":pos} <span class="cnt">${g.length}</span></h2>${g.map(row).join("")}</div>`:""}).join("")+'<p class="note" style="text-align:center">☆ watch a player · Block marks players you would move and shows which teams are short at that position.</p>'}
+  return`<div class="li"><div class="nm">${esc(pname(p.id))}${ibx(p.id)}${tarr(p.id)} ${tags(p)}<br><small>${sub}</small>${b&&p.pos!=="PICK"?`<br><small>${n.length?"Teams short at "+p.pos+": "+n.map(o=>esc(tn(L.id,o.t.n))).join(", "):"No team is clearly short at "+p.pos}</small>`:""}</div><div class="acts"><button class="mini ${w?"on":""}" data-act="watch" data-id="${p.id}" aria-label="Watch">${w?"★":"☆"}</button><button class="mini ${b?"on":""}" data-act="blk" data-id="${p.id}">${b?"On block":"Block"}</button><span class="val">${fmt(adj(p,L))}</span></div></div>`};
+ return movers+["QB","RB","WR","TE","PICK"].map(pos=>{const g=all.filter(p=>p.pos===pos).sort((a,b)=>adj(b,L)-adj(a,L));return g.length?`<div class="card"><h2>${pos==="PICK"?"Picks":pos} <span class="cnt">${g.length}</span></h2>${g.map(row).join("")}</div>`:""}).join("")+'<p class="note" style="text-align:center">☆ watch a player · Block marks players you would move and shows which teams are short at that position.</p>'}
 function pOutlook(){const {L,R,me}=C(),N=NPOS(L);
  const tot=y=>{const o={};R.forEach(t=>{let s=0;for(const pos in N)s+=t.p.map(byId).filter(p=>p&&p.pos===pos).map(p=>adj(p,L)*projF(p,y)).sort((a,b)=>b-a).slice(0,N[pos]).reduce((a,b)=>a+b,0);o[t.n]=s});return o};
  const Y=[0,1,2,3].map(tot),rk=Y.map(o=>Object.keys(o).sort((a,b)=>o[b]-o[a]).map(Number));let tip="";
@@ -650,7 +669,7 @@ function pBuild(){const {L,R,me}=C(),T=S.trade;if(!me)return empty("Choose your 
   if(from){const c=from.p.filter(i=>byId(i)&&!T[key].includes(i)).map(i=>{const x=T[key].concat(i),a=score(key==="give"?x:T.give,L),b=score(key==="get"?x:T.get,L);return{i,d:Math.abs(b-a)/Math.max(a,b,1)}}).sort((x,y)=>x.d-y.d).slice(0,3);
    bal=`<p class="note" style="margin:10px 0 4px">To even it, ${win?"you could add":"ask them to add"}:</p><div class="chips">${c.map(x=>`<button class="pill" data-act="addq" data-k="${key}" data-id="${x.i}">${esc(pname(x.i))} <small>${val(x.i)}</small></button>`).join("")}</div>`}}
  PITCH=makePitch(L,T,par,lb,diff,pname);
- const panel=(key,title)=>`<div class="card"><div class="ph"><h2 style="margin:0">${title}</h2><button class="btn sm ghost" data-act="add" data-k="${key}">+ Add</button></div>${T[key].map(id=>`<div class="li"><div class="nm">${esc(pname(id))}${ibx(id)}<br><small>${pinfo(byId(id))}</small></div><div class="acts"><span class="val">${val(id)}</span><button class="mini" data-act="rm" data-k="${key}" data-id="${id}" aria-label="Remove">✕</button></div></div>`).join("")||'<p class="note">Nothing yet. Tap + Add.</p>'}</div>`;
+ const panel=(key,title)=>`<div class="card"><div class="ph"><h2 style="margin:0">${title}</h2><button class="btn sm ghost" data-act="add" data-k="${key}">+ Add</button></div>${T[key].map(id=>`<div class="li"><div class="nm">${esc(pname(id))}${ibx(id)}${tarr(id)}<br><small>${pinfo(byId(id))}</small></div><div class="acts"><span class="val">${val(id)}</span><button class="mini" data-act="rm" data-k="${key}" data-id="${id}" aria-label="Remove">✕</button></div></div>`).join("")||'<p class="note">Nothing yet. Tap + Add.</p>'}</div>`;
  return`<div class="card"><label>Trading with</label><select data-chg="partner">${R.filter(t=>!t.me).map(t=>`<option value="${t.n}" ${t.n===T.partner?"selected":""}>${esc(tn(L.id,t.n)+(qb1(L.id,t.n)?" · "+qb1(L.id,t.n):"")+" ("+t.rec+")")}</option>`).join("")}</select></div>
  <div class="card"><div class="vd ${cl}">${v}</div><div class="bar"><i class="a" style="width:${g/tot*100}%"></i><i class="b" style="width:${r/tot*100}%"></i></div><div class="split"><span>You give <b>${fmt(g)}</b></span><span>You get <b>${fmt(r)}</b></span></div>${imp}${bal}</div>
  ${panel("give","You give")}${panel("get","You get")}
@@ -771,8 +790,8 @@ function pFree(){const {L,R,me}=C();if(!me)return empty("Choose your team first.
  const swaps=drops.map(d=>{const b=all.find(p=>p.pos===d.pos&&adj(p,L)>adj(d,L)*1.25+100);return b?{d,b}:null}).filter(Boolean);
  return`<div class="card"><h2>Free agents in ${esc(L.name)}</h2><p class="note" style="margin:0 0 8px">Players with a market value who are not on any roster in this league, best first. Waiver priority and FAAB are not visible to this app.</p>
  <div class="chips">${["ALL",...POS4].map(x=>`<button class="chip" data-act="fa" data-v="${x}" aria-pressed="${f===x}">${x==="ALL"?"All":x}</button>`).join("")}</div>
- ${pool.map(p=>`<div class="li"><div class="nm">${esc(p.name)}${ibx(p.id)}<br><small>${pinfo(p)}${trendTxt(p)}</small></div><div class="acts"><button class="mini ${(S.watch||[]).includes(p.id)?"on":""}" data-act="watch" data-id="${p.id}" aria-label="Watch">${(S.watch||[]).includes(p.id)?"★":"☆"}</button><span class="val">${fmt(adj(p,L))}</span></div></div>`).join("")||'<p class="note">No free agents with a value.</p>'}</div>
- <div class="card"><h2>Drop candidates</h2><p class="note" style="margin:0 0 8px">Your lowest-value players, skipping anyone 23 or younger (stash).</p>${drops.map(p=>`<div class="li"><div class="nm">${esc(p.name)}${ibx(p.id)}<br><small>${pinfo(p)}</small></div><span class="val">${fmt(adj(p,L))}</span></div>`).join("")}
+ ${pool.map(p=>`<div class="li"><div class="nm">${esc(p.name)}${ibx(p.id)}${tarr(p.id)}<br><small>${pinfo(p)}${trendTxt(p)}</small></div><div class="acts"><button class="mini ${(S.watch||[]).includes(p.id)?"on":""}" data-act="watch" data-id="${p.id}" aria-label="Watch">${(S.watch||[]).includes(p.id)?"★":"☆"}</button><span class="val">${fmt(adj(p,L))}</span></div></div>`).join("")||'<p class="note">No free agents with a value.</p>'}</div>
+ <div class="card"><h2>Drop candidates</h2><p class="note" style="margin:0 0 8px">Your lowest-value players, skipping anyone 23 or younger (stash).</p>${drops.map(p=>`<div class="li"><div class="nm">${esc(p.name)}${ibx(p.id)}${tarr(p.id)}<br><small>${pinfo(p)}</small></div><span class="val">${fmt(adj(p,L))}</span></div>`).join("")}
  ${swaps.length?`<h3 style="margin:12px 0 4px">Possible swaps</h3>${swaps.map(x=>`<p class="note" style="color:var(--ink);margin:4px 0">Drop ${esc(x.d.name)} (${fmt(adj(x.d,L))}), add ${esc(x.b.name)} (${fmt(adj(x.b,L))})</p>`).join("")}`:""}</div>`}
 /* Trust Center + prediction ledger */
 let LEDGER=[];try{LEDGER=JSON.parse(localStorage.getItem("dd2led"))||[]}catch(e){}
@@ -836,9 +855,9 @@ function pMarket(){const {L}=C();loadMkt();
 /* ---------- More ---------- */
 function valRows(){const {L}=C(),q=UI.vq;
  return S.players.filter(p=>!q||p.name.toLowerCase().includes(q)).sort((a,b)=>b.value-a.value).slice(0,60).map(p=>{const s=p.s||{},g=s.dp&&s.fc?Math.round((s.fc-s.dp)/((s.fc+s.dp)/2)*100):null,w=(S.watch||[]).includes(p.id);
-  return`<div class="li"><div class="nm">${esc(p.name)}<br><small>${pinfo(p)}${s.dp?" · Exp "+s.dp:""}${s.fc?" · Mkt "+s.fc:""}${g!==null?" · gap "+(g>0?"+":"")+g+"%":""}</small></div><div class="acts"><button class="mini ${w?"on":""}" data-act="watch" data-id="${p.id}" aria-label="Watch">${w?"★":"☆"}</button>${p.m?`<button class="mini" data-act="del" data-id="${p.id}" aria-label="Delete">✕</button>`:""}<span class="val">${fmt(p.value)}</span></div></div>`}).join("")||'<p class="note">No matches.</p>'}
+  return`<div class="li"><div class="nm">${esc(p.name)}${tarr(p.id)}<br><small>${pinfo(p)}${s.dp?" · Exp "+s.dp:""}${s.fc?" · Mkt "+s.fc:""}${g!==null?" · gap "+(g>0?"+":"")+g+"%":""}</small></div><div class="acts"><button class="mini ${w?"on":""}" data-act="watch" data-id="${p.id}" aria-label="Watch">${w?"★":"☆"}</button>${p.m?`<button class="mini" data-act="del" data-id="${p.id}" aria-label="Delete">✕</button>`:""}<span class="val">${fmt(p.value)}</span></div></div>`}).join("")||'<p class="note">No matches.</p>'}
 function pMore(){const {L,R}=C(),w=(S.watch||[]).map(byId).filter(Boolean);
- const wl=w.length?w.map(p=>{const t=R.find(x=>x.p.includes(p.id));return`<div class="li"><div class="nm">${esc(p.name)}${ibx(p.id)}<br><small>${pinfo(p)}${trendTxt(p)} · ${t?esc(tn(L.id,t.n)):"free agent"}</small></div><div class="acts"><button class="mini on" data-act="watch" data-id="${p.id}">★</button><span class="val">${fmt(adj(p,L))}</span></div></div>`}).join(""):'<p class="note">Tap ☆ next to any player to watch him.</p>';
+ const wl=w.length?w.map(p=>{const t=R.find(x=>x.p.includes(p.id));return`<div class="li"><div class="nm">${esc(p.name)}${ibx(p.id)}${tarr(p.id)}<br><small>${pinfo(p)}${trendTxt(p)} · ${t?esc(tn(L.id,t.n)):"free agent"}</small></div><div class="acts"><button class="mini on" data-act="watch" data-id="${p.id}">★</button><span class="val">${fmt(adj(p,L))}</span></div></div>`}).join(""):'<p class="note">Tap ☆ next to any player to watch him.</p>';
  return`<div class="back"><button class="ic" data-act="back" aria-label="Back">←</button><h2>More</h2></div>
  <div class="card"><h2>Strategy</h2><div class="seg">${[[-1,"Contend"],[0,"Balanced"],[1,"Rebuild"]].map(([v,n])=>`<button data-act="mode" data-v="${v}" aria-pressed="${stg(L.id)===v}">${n}</button>`).join("")}</div><p class="note">Strategy for ${esc(L.name)}. Rebuild also turns your first tab into the Rebuild plan. Each league has its own setting.</p></div>
  <div class="card"><h2>Watchlist <span class="cnt">${w.length}</span></h2>${wl}</div>
@@ -1043,7 +1062,7 @@ function pPlan(){const X=ctxR();if(!X)return empty("Choose your team first.","Ch
 function pAudit(){const X=ctxR();if(!X)return empty("Choose your team first.","Choose team","who");const {L,R,me,A,PW}=X;
  const G=[["core","Core","good"],["sellnow","Sell now","bad"],["sellwin","Sell by next offseason","warn"],["hold","Hold","good"],["stash","Stash","good"],["depth","Depth",""],["cut","Cut candidates","bad"]];
  const row=r=>{const by=r.cat==="sellnow"||r.cat==="sellwin"?buyersFor(r.p.pos,L,R,me,PW):[];const core=((S.core||{})[L.id]||[]).includes(r.p.id);
-  return`<div class="li"><div class="nm"><b>${esc(r.p.name)}</b>${ibx(r.p.id)} ${r.start?rtag("","Starter"):""} ${r.prem?rtag("warn","Sell only for 20%+ over"):""}<br><small>${pinfo(r.p)} · ${fmt(r.v)} now → ${fmt(r.v3)} in ${SEAS()+3}</small><br><small>${esc(r.why)}</small>${by.length?`<br><small>Ask for ${askFor(r.v)}. Teams short at ${r.p.pos}: ${by.map(b=>esc(tn(L.id,b.t.n))).join(", ")}</small>`:""}</div><div class="acts" style="flex-direction:column;align-items:flex-end"><button class="mini ${core?"on":""}" data-act="core" data-id="${r.p.id}">${core?"Core":"Lock"}</button>${by.length?`<button class="btn sm ghost" data-act="shop" data-id="${r.p.id}">Shop</button>`:""}</div></div>`};
+  return`<div class="li"><div class="nm"><b>${esc(r.p.name)}</b>${ibx(r.p.id)}${tarr(r.p.id)} ${r.start?rtag("","Starter"):""} ${r.prem?rtag("warn","Sell only for 20%+ over"):""}<br><small>${pinfo(r.p)} · ${fmt(r.v)} now → ${fmt(r.v3)} in ${SEAS()+3}</small><br><small>${esc(r.why)}</small>${by.length?`<br><small>Ask for ${askFor(r.v)}. Teams short at ${r.p.pos}: ${by.map(b=>esc(tn(L.id,b.t.n))).join(", ")}</small>`:""}</div><div class="acts" style="flex-direction:column;align-items:flex-end"><button class="mini ${core?"on":""}" data-act="core" data-id="${r.p.id}">${core?"Core":"Lock"}</button>${by.length?`<button class="btn sm ghost" data-act="shop" data-id="${r.p.id}">Shop</button>`:""}</div></div>`};
  const tiles=`<div class="stats">${tile("Sell",fmt((A.sum("sellnow")+A.sum("sellwin"))),(A.g.sellnow||[]).length+(A.g.sellwin||[]).length+" players")}${tile("Hold",fmt(A.sum("hold")+A.sum("core")),((A.g.hold||[]).length+(A.g.core||[]).length)+" players")}${tile("Stash",(A.g.stash||[]).length,"prospects")}${tile("Cut",(A.g.cut||[]).length,"spots")}</div>`;
  return tiles+G.map(([k,n,c])=>(A.g[k]||[]).length?`<div class="card"><h2>${n} ${rtag(c,(A.g[k]||[]).length)}</h2>${A.g[k].map(row).join("")}</div>`:"").join("")+`<p class="note" style="text-align:center">Values are market value for your league's scoring, before any strategy weighting. Lock any player you won't sell.</p>`}
 function pRPicks(){const X=ctxR();if(!X)return empty("Choose your team first.","Choose team","who");const {L,R,me,W,PK}=X;
@@ -1092,7 +1111,7 @@ function draftPlan(L,R,me){const tolK=S.dtol||"bal";return memo("dpl|"+L.id+"|"+
  return{by,steps,lu:lsum(cur,sl).lu,base:start.lu}})}
 
 try{const c=JSON.parse(localStorage.getItem("dd2sync"));if(c&&c.ROST){ROST=c.ROST;STAND=c.STAND;LPICKS=c.LPICKS;TEAMS=c.TEAMS||{};TRADES=c.TRADES||{};PENDING=c.PENDING||{};LGI=c.LGI||{};LSCH=c.LSCH||{};if(c.WEEK!=null)WEEK=c.WEEK;SYNCINFO=c.SYNCINFO+" (saved)";build()}}catch(e){}
-loadVals();applyBD();applyMe();try{if(!S.core){const m=(ROST.A||[]).find(t=>t.me);if(m&&m.p.includes("p_jaxon_smith_njigba")&&m.p.includes("pk_A_1_"+m.n)){S.core={A:["p_jaxon_smith_njigba","pk_A_1_"+m.n]};save()}}}catch(e){}
+loadVals();applyBD();loadVHist();applyMe();try{if(!S.core){const m=(ROST.A||[]).find(t=>t.me);if(m&&m.p.includes("p_jaxon_smith_njigba")&&m.p.includes("pk_A_1_"+m.n)){S.core={A:["p_jaxon_smith_njigba","pk_A_1_"+m.n]};save()}}}catch(e){}
 UI.sheet=S.viewAsSet?null:{t:"who"};
 render();syncSleeper();
 
