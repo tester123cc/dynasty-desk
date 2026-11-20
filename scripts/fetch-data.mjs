@@ -8,7 +8,7 @@ function csvRows(t){const rows=[];let r=[],c="",q=false;for(let i=0;i<t.length;i
 const near=(v,a)=>a.reduce((b,x)=>Math.abs(x-v)<Math.abs(b-v)?x:b,a[0]);
 const KTCU="https://keeptradecut.com/dynasty-rankings?format=2";
 function parseKTC(t){t=String(t||"").trim();let arr=null;
- try{if(t[0]==="["){arr=JSON.parse(t)}else{const i=t.indexOf("playersArray");if(i<0)return null;const a=t.indexOf("[",i);if(a<0)return null;let d=0,q=false,e=-1;
+ try{const tg=/<script[^>]*id=["']ktc-players["'][^>]*>([\s\S]*?)<\/script>/.exec(t);if(t[0]==="["){arr=JSON.parse(t)}else if(tg){arr=JSON.parse(tg[1])}else{const i=t.indexOf("playersArray");if(i<0)return null;const a=t.indexOf("[",i);if(a<0)return null;let d=0,q=false,e=-1;
   for(let j=a;j<t.length;j++){const c=t[j];if(q){if(c==="\\")j++;else if(c==='"')q=false}else if(c==='"')q=true;else if(c==="[")d++;else if(c==="]"){d--;if(d===0){e=j;break}}}
   if(e<0)return null;arr=JSON.parse(t.slice(a,e+1))}}catch(x){return null}
  if(!Array.isArray(arr))return null;const raw=[];let mx=0;
