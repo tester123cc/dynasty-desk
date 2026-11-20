@@ -14,6 +14,10 @@ jobs:
         with:
           node-version: 20
       - run: node scripts/fetch-data.mjs
+      - name: Sample market trades
+        run: node scripts/crawl-trades.mjs
+        continue-on-error: true
+        timeout-minutes: 25
       - name: Commit changes
         run: |
           git config user.name "github-actions[bot]"
