@@ -26,3 +26,11 @@ Single-file static web app (`index.html`) served by GitHub Pages at tester123cc.
 
 ## Roadmap (not done)
 Live Sleeper draft sync; re-rank rookies after the April NFL draft; trend arrows from `data/history.json`; refresh rookie rankings (they go stale weekly; Dynasty Nerds only publishes a top 25).
+
+## Status as of Nov 20, 2026 (checked on the live site)
+- Live Sleeper sync works (week 11; Boo Boo Baby 17 trades, The Flight Log 5). Pending trades did not show up in either league, so Sleeper likely does not return proposals; the Builder grade is the dependable path.
+- Prior-season trade history returned nothing (`old: 0`); check whether the leagues have a `previous_league_id`.
+- Market tab: 15,000 KeepTradeCut trades on file, about 14,800 priced; the market sample sets the typical trade gap and consolidation premium (v7.11).
+- Boo Boo Baby currently gets no suggested offers (strict "must help the other team" bar); The Flight Log gets six. Revisit if the user wants more.
+- Not verified live: free agents tab, Trust Center ledger over time, mock draft with live league data, nightly job workflow permission for pushing data (worked on Nov 20).
+- Open PRs/merges are tracked on GitHub; the user says "merge" to approve.
