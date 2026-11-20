@@ -13,9 +13,9 @@ Single-file static web app (`index.html`) served by GitHub Pages at tester123cc.
 - Rookie board sources live in `/home/claude/rb27` in cloud sessions only (not in the repo); re-extract the board from `RB27_HTML` if you need to edit it.
 
 ## Key internals
-- Values: DynastyProcess CSV + FantasyCalc (per-league ppr/numQbs) + KeepTradeCut, blended by `S.weights`; `adj = value*mult*ageF*modeF`. `mv(p,L)` is market value without age discount (used for trade grading).
+- Values: DynastyProcess CSV + FantasyCalc (per-league ppr/numQbs) + KeepTradeCut, blended by `S.weights`; `adj = value*mult*ageF*modeF`. `mv(p,L)` is market value without age discount (used for trade grading). KeepTradeCut's rankings page now keeps players in `<script id="ktc-players">` JSON; `parseKTC` reads that first (same code in `scripts/fetch-data.mjs`). Browsers can't fetch KeepTradeCut (CORS), so the app uses the nightly copy in `data/values.json` when it is under 48h old. Missing player ages are filled from Sleeper birth dates (`BDX`, `applyBD`).
 - Offers: `makeOffers`/`makeSells`, tuned by `learnTrades(L)` (league trades plus market trades). Pending trades: `PENDING`, `pendCard`; Sleeper may not return proposals.
-- Draft order: `projOrder(lg)` runs 1,000 season sims; falls back to `draftOrder`. Pick ids: `pk_<lg>_<round>_<origRoster>[_yy]`.
+- Draft order: `projOrder(lg)` runs 1,000 season sims (drives My picks slots); falls back to `draftOrder` (today's order, used by Home and Roster). The "Projected final draft order" card runs its own 700-sim `projSim`. Odds and projections are cached by `VER`, which bumps when injuries/teams load, so they recompute once that data arrives. Pick ids: `pk_<lg>_<round>_<origRoster>[_yy]`.
 - Market tab: `pMarket`, `mktItem`, `mktRows`; KeepTradeCut ppr codes 1=0, 2=.5, 3=1, 4=tiered; tep 0-3.
 
 ## Working rules
@@ -31,6 +31,7 @@ Live Sleeper draft sync; re-rank rookies after the April NFL draft; trend arrows
 - Live Sleeper sync works (week 11; Boo Boo Baby 17 trades, The Flight Log 5). Pending trades did not show up in either league, so Sleeper likely does not return proposals; the Builder grade is the dependable path.
 - Prior-season trade history returned nothing (`old: 0`); check whether the leagues have a `previous_league_id`.
 - Market tab: 15,000 KeepTradeCut trades on file, about 14,800 priced; the market sample sets the typical trade gap and consolidation premium (v7.11).
-- Boo Boo Baby currently gets no suggested offers (strict "must help the other team" bar); The Flight Log gets six. Revisit if the user wants more.
+- Boo Boo Baby rarely clears the buy bar; when nothing is Likely/Possible, Ideas now shows the best sell idea per position (v7.12).
+- Rookie rankings: `RK.pros` (Draft → Board, My picks) is generated from the 2027 Board's `RAW` rows and uses the same consensus formula. If you update the 2027 Board, regenerate `RK.pros` too.
 - Not verified live: free agents tab, Trust Center ledger over time, mock draft with live league data, nightly job workflow permission for pushing data (worked on Nov 20).
 - Open PRs/merges are tracked on GitHub; the user says "merge" to approve.
