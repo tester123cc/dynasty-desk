@@ -783,10 +783,11 @@ function trustHtml(L,R){const ck=[],add=(l,g,d)=>ck.push([l,g,d]);let miss=0,tot
 /* ---------- Market trades (sampled from public Sleeper dynasty leagues by the nightly job) ---------- */
 let MKTR=null,MKTLOAD=0;
 function loadMkt(){if(MKTR||MKTLOAD)return;MKTLOAD=1;fetch("data/market-trades.json?"+Math.floor(Date.now()/36e5)).then(r=>r.json()).then(j=>{MKTR=j;MKTLOAD=2;try{render()}catch(e){}}).catch(()=>{MKTLOAD=3;try{render()}catch(e){}})}
-function pkRoundVal(L,season,round){const yr=+season,cur=SEAS()+1,suf=yr>cur?"_"+String(yr).slice(2):"",vs=[];S.players.forEach(p=>{if(p.pos==="PICK"&&p.id.startsWith("pk_"+L.id+"_"+round+"_")){const rest=p.id.slice(("pk_"+L.id+"_"+round+"_").length),f=rest.split("_");if(yr>cur?(f.length===2&&f[1]===suf.slice(1)):f.length===1)vs.push(adj(p,L))}});return vs.length?vs.reduce((a,b)=>a+b,0)/vs.length:0}
+function pkRoundVal(L,season,round){const yr=+season,cur=SEAS()+1,suf=yr>cur?"_"+String(yr).slice(2):"",vs=[];S.players.forEach(p=>{if(p.pos==="PICK"&&p.id.startsWith("pk_"+L.id+"_"+round+"_")){const rest=p.id.slice(("pk_"+L.id+"_"+round+"_").length),f=rest.split("_");if(yr>cur?(f.length===2&&f[1]===suf.slice(1)):f.length===1)vs.push(adj(p,L))}});if(!vs.length&&yr>cur){const b=pkRoundVal(L,String(cur),round);return b*Math.max(.6,1-.1*(yr-cur))}return vs.length?vs.reduce((a,b)=>a+b,0)/vs.length:0}
 function mktSettings(L){const g=LGI[L.id]||{};const li=L.set||{};return{sf:L.sf==null?1:(L.sf?1:0),ppr:L.ppr==null?(L.id==="A"?.5:1):L.ppr,tm:12}}
 function mktItem(L,id,cf){const q=MKTR.players&&MKTR.players[id];if(!q)return null;const nm=q[0],pos=q[1];
- if(pos==="RDP"){const m=/^(\d{4}) Round (\d)/.exec(nm),k=/^(\d{4}) Pick (\d)\.(\d+)/.exec(nm);
+ if(pos==="RDP"){const m=/^(\d{4}) Round (\d)/.exec(nm),k=/^(\d{4}) Pick (\d)\.(\d+)/.exec(nm),t=/^(\d{4}) (Early|Mid|Late) (\d)/.exec(nm);
+  if(t&&+t[1]>=SEAS()+1){const r=+t[3],sl={Early:2,Mid:6,Late:11}[t[2]];let v=0;if(+t[1]===SEAS()+1&&cf)v=cf((r-1)*12+sl);else{v=pkRoundVal(L,t[1],r)*({Early:1.12,Mid:1,Late:.88}[t[2]])}return v>0?{v,nm:t[1]+" "+t[2].toLowerCase()+" "+r+({1:"st",2:"nd",3:"rd"}[r]||"th"),pk:1}:null}
   if(m&&+m[1]>=SEAS()+1){const v=pkRoundVal(L,m[1],+m[2]);return v?{v,nm,pk:1}:null}
   if(k&&+k[1]===SEAS()+1&&cf){const o=(+k[2]-1)*12+(+k[3]),v=cf(o);return v>0?{v,nm:k[1]+" pick "+k[2]+"."+k[3],pk:1}:null}return null}
  const p=byId(pidOf(nm));return p?{v:adj(p,L),nm:p.name,p}:null}
