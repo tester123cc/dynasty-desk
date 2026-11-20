@@ -10,7 +10,7 @@ export function extractPlayers(html){const k=html.indexOf("var playersArray = ")
 export function compact(trades,players){const pm={};players.forEach(p=>{pm[p.playerID]=p});const used={},out=[];
  for(const t of trades){const st=t.settings||{};if(!t.teamOne||!t.teamTwo||!t.teamOne.playerIds.length||!t.teamTwo.playerIds.length)continue;
   const ok=ids=>ids.every(id=>pm[id]);if(!ok(t.teamOne.playerIds)||!ok(t.teamTwo.playerIds))continue;
-  [...t.teamOne.playerIds,...t.teamTwo.playerIds].forEach(id=>{used[id]=[pm[id].playerName,pm[id].position]});
+  [...t.teamOne.playerIds,...t.teamTwo.playerIds].forEach(id=>{used[id]=[pm[id].playerName,pm[id].position,Math.round(((pm[id].superflexValues||{}).value)||0),Math.round(((pm[id].oneQBValues||{}).value)||0)]});
   out.push({id:String(t.id),d:Math.floor(Date.parse(t.date)/1000),sf:st.qBs===2?1:0,ppr:PPR[st.ppr]==null?-1:PPR[st.ppr],te:st.tep||0,tm:st.teams||12,a:t.teamOne.playerIds.map(String),b:t.teamTwo.playerIds.map(String)})}
  return{trades:out,players:used}}
 async function main(){
