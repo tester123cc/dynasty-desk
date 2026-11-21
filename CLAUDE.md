@@ -18,11 +18,11 @@ Single-file static web app (`index.html`) served by GitHub Pages at tester123cc.
 ## Key internals
 - Values: DynastyProcess CSV + FantasyCalc (per-league ppr/numQbs) + KeepTradeCut, blended by `S.weights`; `adj = value*mult*ageF*modeF`. `mv(p,L)` is market value without age discount (used for trade grading). KeepTradeCut's rankings page keeps players in `<script id="ktc-players">` JSON (changed in 2026; the old `playersArray` scan now finds only 3 featured players); `parseKTC` reads the new block first (same code in `scripts/fetch-data.mjs`). Browsers can't fetch KeepTradeCut (CORS, and the proxies return 401), so the app uses the nightly copy in `data/values.json` when it is under 48h old. Missing player ages are filled from Sleeper birth dates (`BDX`, `applyBD`), refreshed with injuries every 4h.
 - Caching: `memo()` results and the odds/projection caches are keyed on `VER`. **Bump `VER` whenever async data lands** (values via `build()`, injuries/teams in `refreshInjuries`, market trades in `loadMkt`, history in `loadVHist`); forgetting this caused stale playoff odds and empty trade suggestions.
-- Offers: `makeOffers`/`makeSells`, tuned by `learnTrades(L)` (league trades plus market trades). `makeRebuildOffers` (v7.15) sells veterans (26+) for young players (24.5 or under) and 1st/2nd-round picks, scored on the lineup 3 seasons out (`fct` aging; picks at 75%) and requiring the partner's lineup now not to drop; one offer per team, the same package at most twice. `rbOffers` turns it on when the league's Strategy is Rebuild, or when no strategy was chosen (`S.modeSet`) and the team grades as Rebuilding. Pending trades: `PENDING`, `pendCard`.
+- Offers: `makeOffers`/`makeSells`, tuned by `learnTrades(L)` (league trades plus market trades). `makeRebuildOffers` (v7.15) sells veterans (26+) for young players (24.5 or under) and 1st/2nd-round picks, scored on the lineup 3 seasons out (`fct` aging; picks at 75%) and requiring the partner's lineup now not to drop; one offer per team, the same package at most twice. `posNeed` (v7.16) weights your side of `makeOffers`/`makeSells` by position need: your starters at each position vs the league median (QB counts the superflex slot), weak spots up to 1.4x, deep ones 0.9x; in superflex a trade may not leave you with fewer starting-caliber QBs. `rbOffers` turns it on when the league's Strategy is Rebuild, or when no strategy was chosen (`S.modeSet`) and the team grades as Rebuilding. Pending trades: `PENDING`, `pendCard`.
 - Draft order: `projOrder(lg)` runs 1,000 season sims (drives My picks slots); falls back to `draftOrder` (today's order, used by Home and Roster). The "Projected final draft order" card runs its own 700-sim `projSim`. Pick ids: `pk_<lg>_<round>_<origRoster>[_yy]`.
 - Live draft sync (v7.14): `drFind` looks for the 2027 rookie draft (season 2027, not auction, 8 rounds or fewer) in the league's drafts and in its 2027 renewal (`/user/<id>/leagues/nfl/2027` where `previous_league_id` matches). `drPoll`/`drTick` poll `/draft/<id>`, `/picks` and `/traded_picks`: every 8s while drafting, 60s paused, 30s within 3h of a scheduled start, else 5 min; slower when the tab is hidden; restarted after each Sleeper sync. `drPayload` goes to the board as `dd-draft`; the board matches names with `nkey` (drops Jr/Sr/II), makes `x_` stub players for picks not on the board, stores it in `S.sl`, and shows it on Draft day (`vSync`), Board (taken tags) and Mock ("Start from the live draft"). Once Sleeper has a draft order, `dd-live` sends that order and snake setting.
 - Rookie rankings: `RK.pros` (Draft → Board, My picks) is generated from the 2027 Board's `RAW` rows and uses the same consensus formula. If you update the 2027 Board, regenerate `RK.pros` too.
-- Trend arrows: `loadVHist` merges `data/history-weekly.json` with the nightly `data/history.json` (nightly wins on shared dates). `vtrend` compares a player's latest expert value with ~4 weeks earlier (1 week if that is all there is); `tarr(id)` draws ▲/▼ at 8%+ and 150+ points, double at 20%+ and 400+. Arrows sit next to every `ibx()` injury tag and on the value board; Roster has a Rising and falling card. Expert values only.
+- Trend arrows: `loadVHist` merges `data/history-weekly.json` with the nightly `data/history.json` (nightly wins on shared dates). `vtrend` compares a player's latest expert value with ~4 weeks earlier (1 week if that is all there is); `mtrend(p,lg)` (v7.16) does the same for market value in the league's format: nightly history rows now carry `m:{A,B}` (FantasyCalc, top 400) and, until that covers a week, it falls back to FantasyCalc's own 30-day trend (`p.tr`, now scaled like the values). `tarr(id)` shows whichever moved more and puts both in the tooltip; ▲/▼ at 8%+ and 150+ points, double at 20%+ and 400+. Arrows sit next to every `ibx()` injury tag and on the value board; Roster's Rising and falling card still uses expert values.
 - Market tab: `pMarket`, `mktItem`, `mktRows`; KeepTradeCut ppr codes 1=0, 2=.5, 3=1, 4=tiered; tep 0-3.
 
 ## Sleeper API facts (checked Nov 20, 2026)
@@ -30,8 +30,8 @@ Single-file static web app (`index.html`) served by GitHub Pages at tester123cc.
 - Draft picks carry `pick_no`, `round`, `draft_slot`, `roster_id` (who picked) and `metadata` (`first_name`, `last_name`, `position`, `team`). Snake round 2 pick 13 is labeled 2.01.
 - `/players/nfl` is about 5 MB; the app fetches it at most every 4h for injuries, teams and birth dates.
 
-## UI conventions (v7.15)
-- Keep screens short on a phone: explanations go in `info(html,label)` (a small "How this works" toggle), filters in dropdowns (`.fsel`) or collapsed `details`, long lists paged (Market shows 20, +40 per "Show more"). Roster rows open on tap (`UI.rx`) to show Watch, Block and Shop. Inside an offer card, the partner's own picks drop the team name (`pnIn`).
+## UI conventions (v7.16)
+- Keep screens short on a phone: explanations go in `info(html,label)` (a small "How this works" toggle), filters in dropdowns (`.fsel`) or collapsed `details`, long lists paged (Market shows 20, +40 per "Show more"). Roster and Free agents rows open on tap (`UI.rx`) to show Watch (plus Block and Shop on Roster). Free agents (15, +25) and League Trades (8, +20) are paged; Tank or compete merges identical rows into ranges. Inside an offer card, the partner's own picks drop the team name (`pnIn`).
 - Before and after a layout change, measure each screen at 375x812: height in screens, button count, and the share of explanatory text.
 
 ## Working rules
@@ -49,6 +49,9 @@ Single-file static web app (`index.html`) served by GitHub Pages at tester123cc.
 - #12: trend arrows plus the weekly history backfill.
 - v7.15 (#13): rebuild trade suggestions for Boo Boo Baby and a decluttered layout (Roster buttons 76 to 4, Market 8.6 to 4.4 screens, More 6.9 to 0.9).
 
+## Shipped Nov 21, 2026
+- v7.16: position-need weighting in trade suggestions (Flight Log now buys QBs instead of selling Bo Nix), market-value trend arrows plus nightly market history, and layout cleanup (Free agents 3.8 to 1.9 screens and 39 to 5 buttons, League Trades paged, Draft order 2.4 to 2.0). Verified offline against the embedded snapshot only (sandbox blocks Sleeper).
+
 ## Status (live site, Nov 20, 2026, v7.15)
 - Every tab in both leagues and all six 2027 Board tabs load with no errors. Sleeper sync works (week 11; Boo Boo Baby 17 trades, The Flight Log 5).
 - Works: free agents (all listed players truly unrostered), Trust Center checks, Market (15,000 trades; 2,028 and 7,468 priced in each format), trend arrows, rebuild suggestions, team picker.
@@ -56,9 +59,8 @@ Single-file static web app (`index.html`) served by GitHub Pages at tester123cc.
 - The week 11 prediction saved on devices that visited before v7.12 was recorded before injury data loaded (Flight Log 55%); it is not redone.
 
 ## Left to do
-- **Confirm KeepTradeCut in the nightly job**: the first run with the new reader is the 09:17 UTC run after Nov 20; check `data/values.json` has `ok.kt` and a non-empty `kt`. Until then the app says "no crowd".
+- KeepTradeCut in the nightly job is confirmed (Nov 20 22:09 UTC run: `ok.kt` true, 500 players).
+- **Check v7.16 on live data**: trade suggestions in both leagues, market arrows, and that the next nightly run writes `m` into `data/history.json`.
 - **Live draft sync on a real draft**: untested against a live Sleeper draft, a real 2027 renewal, a long draft, or a phone sleeping mid-draft. Also, trades made in the renewed 2027 league are not in the board's "my picks" list (it reads the 2026 league); the draft's own `traded_picks` covers who is on the clock.
-- **Flight Log trade suggestions** still judge only this season's lineup by value, so some trade away Bo Nix even though QB is the team's weakest spot. Consider position-need weighting.
-- **More layout cleanup candidates**: Draft order (2.8 screens), Free agents (a ☆ button on every row), League Trades (4.8 screens).
+- **More layout cleanup candidates**: Market (5.0 screens offline), Draft → Board (4.3), Roster (3.8).
 - Re-rank rookies after the April 29, 2027 NFL draft; refresh rookie rankings (they go stale weekly; Dynasty Nerds only publishes a top 25). The 2027 Board's data is dated Nov 15.
-- Trend arrows track expert values only; a market-value history would need the nightly job to store FantasyCalc too.
