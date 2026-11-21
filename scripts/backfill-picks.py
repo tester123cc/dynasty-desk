@@ -128,7 +128,7 @@ slots = {i: {"n": 0, "hit": 0, "ex": []} for i in range(1, 49)}
 for dy in range(2015, this_year):
     if last_done - dy < 1:
         continue   # need two finished seasons
-    after = [d for d in days if d >= f"{dy}-06-01" and d < f"{dy}-08-01"]
+    after = [d for d in days if d >= f"{dy}-06-01" and d < f"{dy}-09-01"]
     if not after:
         continue
     try:
