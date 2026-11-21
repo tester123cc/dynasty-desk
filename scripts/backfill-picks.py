@@ -49,7 +49,21 @@ print("commits back to", days[0], "days", len(days))
 CACHE = {}
 def rows_on(d):
     if d not in CACHE:
-        CACHE[d] = list(csv.DictReader(io.StringIO(get(RAW.format(sha=by_day[d])))))
+        rows = []
+        for r in csv.DictReader(io.StringIO(get(RAW.format(sha=by_day[d])))):
+            r = {(k or "").strip().lower(): v for k, v in r.items()}   # older files use other header spellings
+            for alt in ("name", "player_name", "full_name"):
+                if "player" not in r and alt in r:
+                    r["player"] = r[alt]
+            if "pos" not in r and "position" in r:
+                r["pos"] = r["position"]
+            if "value_2qb" not in r:
+                for alt in ("value_sf", "value_superflex", "value"):
+                    if alt in r:
+                        r["value_2qb"] = r[alt]; break
+            if r.get("player"):
+                rows.append(r)
+        CACHE[d] = rows
     return CACHE[d]
 def num(x):
     try:
@@ -117,7 +131,12 @@ for dy in range(2015, this_year):
     after = [d for d in days if d >= f"{dy}-06-01" and d < f"{dy}-08-01"]
     if not after:
         continue
-    rows = rows_on(after[0])
+    try:
+        rows = rows_on(after[0])
+    except Exception as e:
+        print("skip class", dy, e); continue
+    if not any("draft_year" in r for r in rows[:5]):
+        print("skip class", dy, "no draft_year column"); continue
     rk = sorted(((num(r.get("value_2qb")), r) for r in rows if str(r.get("draft_year", "")).strip() == str(dy) and r.get("pos") in LIM), key=lambda x: -x[0])[:48]
     if len(rk) < 24:
         continue
