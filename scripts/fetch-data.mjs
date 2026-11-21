@@ -31,13 +31,20 @@ out.fc=out.fc||{A:{},B:{}};
 for(const lg of["A","B"]){try{let ppr=lg==="A"?0.5:1,teams=12,qbs=2,tep="none";
  try{const li=await(await get("https://api.sleeper.app/v1/league/"+LEAGUES[lg])).json(),sc=li.scoring_settings||{};if(sc.rec!=null)ppr=near(+sc.rec,[0,.5,1]);teams=near(li.total_rosters||12,[8,10,12,14]);qbs=(li.roster_positions||[]).includes("SUPER_FLEX")?2:1;const te=sc.bonus_rec_te||0;tep=te>=1?"te++":te>=.5?"te+":"none"}catch(e){}
  const a=await(await get("https://api.fantasycalc.com/values/current?isDynasty=true&numQbs="+qbs+"&numTeams="+teams+"&ppr="+ppr+(tep!=="none"?"&tep="+tep:""))).json();let mx=0;a.forEach(x=>{mx=Math.max(mx,x.value)});
- const m={};a.forEach(x=>{const pl=x.player;m[pkey(pl.name)]={n:pl.name,pos:pl.position,age:pl.maybeAge||0,v:Math.round(x.value/mx*10000),sid:pl.position==="PICK"?null:pl.sleeperId,tr:x.trend30Day||0}});
+ const m={};a.forEach(x=>{const pl=x.player;m[pkey(pl.name)]={n:pl.name,pos:pl.position,age:pl.maybeAge||0,v:Math.round(x.value/mx*10000),sid:pl.position==="PICK"?null:pl.sleeperId,tr:Math.round((x.trend30Day||0)/mx*10000)}});
  if(a.length>50){out.fc[lg]=m;out.ok["fc"+lg]=true}}catch(e){pr("FC "+lg+" failed",e.message)}}
 // KeepTradeCut (crowd)
 try{const km=parseKTC(await(await get(KTCU,45000)).text());if(km&&Object.keys(km).length>50){out.kt=km;out.ok.kt=true}}catch(e){pr("KTC failed",e.message)}
 fs.mkdirSync("data",{recursive:true});fs.writeFileSync("data/values.json",JSON.stringify(out));
-// history: one row per day with expert values for the top 400 players
+// history: one row per day with expert values (v) and market values per league (m) for the top 400 players
 if(out.ok.dp){let h={rows:[]};try{h=JSON.parse(fs.readFileSync("data/history.json","utf8"))}catch(e){}
  const d=new Date().toISOString().slice(0,10),top=Object.entries(out.dp).sort((a,b)=>b[1].v-a[1].v).slice(0,400),row={d,v:Object.fromEntries(top.map(([k,x])=>[k,x.v]))};
+ // market (FantasyCalc) values per league format, so trend arrows can follow the market too
+ const m={};for(const lg of["A","B"])if(out.ok["fc"+lg])m[lg]=Object.fromEntries(Object.entries(out.fc[lg]).filter(([,x])=>x.pos!=="PICK").sort((a,b)=>b[1].v-a[1].v).slice(0,400).map(([k,x])=>[k,x.v]));if(Object.keys(m).length)row.m=m;
  h.rows=(h.rows||[]).filter(r=>r.d!==d).concat(row).slice(-90);fs.writeFileSync("data/history.json",JSON.stringify(h))}
+// this week's Sleeper projections (fallback for the app's Week tab when the browser cannot reach the feed)
+try{const st=await(await get("https://api.sleeper.app/v1/state/nfl")).json(),y=+(st.season||st.league_season),w=+(st.display_week||st.week);
+ if(y&&w>=1&&w<=18){const r=await(await get("https://api.sleeper.app/projections/nfl/"+y+"/"+w+"?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE")).json(),P={};
+  (Array.isArray(r)?r:Object.entries(r||{}).map(([k,v])=>({player_id:k,stats:v}))).forEach(x=>{if(!x||!x.player_id)return;const s={},sx=x.stats||{};if(sx.pts_ppr==null)return;for(const k in sx){const v=+sx[k];if(v&&isFinite(v)&&!/adp/.test(k))s[k]=Math.round(v*100)/100}if(Object.keys(s).length)P[x.player_id]=x.opponent?{s,o:x.opponent}:{s}});
+  if(Object.keys(P).length>50){fs.writeFileSync("data/proj.json",JSON.stringify({season:y,week:w,t:Date.now(),p:P}));out.ok.proj=true;pr("proj",y,w,Object.keys(P).length,"shape",Array.isArray(r)?"array":"object")}}}catch(e){pr("proj failed",e.message)}
 pr("done",JSON.stringify(out.ok),"dp",Object.keys(out.dp).length,"kt",Object.keys(out.kt).length);
