@@ -86,7 +86,7 @@ def save_cache():
 def college(name, school, pos, draft_year, fresh_days=None):
     k = pkey(name) + "|" + str(draft_year)
     c = CACHE.get(k)
-    if c and (fresh_days is None or time.time() - c.get("t", 0) < fresh_days * 86400):
+    if c and not c.get("err") and (fresh_days is None or time.time() - c.get("t", 0) < fresh_days * 86400):
         return c
     if time.time() - T0 > BUDGET:
         return c or {"t": 0, "id": None, "s": {}, "pending": 1}
@@ -103,14 +103,14 @@ def college(name, school, pos, draft_year, fresh_days=None):
         CACHE[k] = c
     return c
 def prefetch(items):  # items: (name, school, pos, draft_year, fresh_days); looks players up 6 at a time, saving every 50
-    todo = [x for x in items if not (CACHE.get(pkey(x[0]) + "|" + str(x[3])) and (x[4] is None or time.time() - CACHE[pkey(x[0]) + "|" + str(x[3])].get("t", 0) < x[4] * 86400))]
+    todo = [x for x in items if not (CACHE.get(pkey(x[0]) + "|" + str(x[3])) and not CACHE[pkey(x[0]) + "|" + str(x[3])].get("err") and (x[4] is None or time.time() - CACHE[pkey(x[0]) + "|" + str(x[3])].get("t", 0) < x[4] * 86400))]
     print("college lookups needed", len(todo))
     done = [0]
     def one(x):
         college(*x); done[0] += 1
         if done[0] % 50 == 0:
             save_cache(); print("  looked up", done[0], "in", int(time.time() - T0), "s", flush=True)
-    with ThreadPoolExecutor(6) as ex:
+    with ThreadPoolExecutor(4) as ex:
         list(ex.map(one, todo))
     save_cache()
 def good(pos, s, partial=False):
@@ -191,8 +191,8 @@ rows = [x for x in rows if x["cf"]]   # train only on players whose college stat
 
 # ---------- model ----------
 POSD = ["RB", "WR", "TE"]
-def feats(x): return [-math.log(x["pick"]), x["good"], x["land"]] + [1.0 if x["pos"] == p else 0.0 for p in POSD]
-FN = ["Draft pick", "Good college seasons", "Landing offense", "RB", "WR", "TE"]
+def feats(x): return [-math.log(x["pick"]), x["good"], x["land"]] + [1.0 if x["pos"] == p else 0.0 for p in POSD] + [x["good"] * (1.0 if x["pick"] <= 64 else 0.0)]
+FN = ["Draft pick", "Good college seasons", "Landing offense", "RB", "WR", "TE", "College seasons, rounds 1–2"]
 def fit(R, cols=None, lam=1.0, it=3000, lr=.1):
     X = [feats(x) for x in R]
     if cols is not None: X = [[v if j in cols else 0.0 for j, v in enumerate(f)] for f in X]
@@ -225,8 +225,11 @@ def loco(cols):  # leave one draft class out
         m = fit(tr, cols, it=1200)
         ps += [pred(m, x) for x in te]; ys += [x["hit"] for x in te]
     return {"brier": round(sum((p - y) ** 2 for p, y in zip(ps, ys)) / len(ys), 4), "auc": round(auc(ps, ys), 3)}
-FULL = loco(None); PICK = loco([0, 3, 4, 5])
-M = fit(rows)
+BASE = [0, 1, 2, 3, 4, 5]; INTER = [0, 1, 2, 3, 4, 5, 6]
+PICK = loco([0, 3, 4, 5]); FB = loco(BASE); FI = loco(INTER)
+USE, FULL = (INTER, FI) if FI["brier"] < FB["brier"] else (BASE, FB)
+print("loco base", FB, "with rounds 1-2 term", FI, "using", "interaction" if USE == INTER else "base")
+M = fit(rows, USE)
 print("model", [round(v, 3) for v in M["w"]], "loco full", FULL, "pick only", PICK)
 
 # ---------- patterns (plain hit rates, for the page) ----------
@@ -259,6 +262,10 @@ else:
     sl, ic = 1.0, math.log(2)
 kmax = max([r[6] for r in RAW if isinstance(r[6], (int, float))] or [25])
 prefetch([(r[0], r[2], r[1], DY, 6) for r in RAW if r[1] in LIM])
+unl = sorted([r for r in RAW if r[1] in LIM and not isinstance(r[6], (int, float))], key=lambda r: cons(r) or 999)
+skill = [x for x in DP if 2015 <= int(x["season"]) <= LAST_DONE - 1]; per = 257 * len({x["season"] for x in skill}) / max(1, len(skill))
+PROJ = {r[0]: round(kmax + (i + 1) * per) for i, r in enumerate(unl)}
+print("picks per skill player", round(per, 2))
 prospects = []
 for r in RAW:
     name, pos, school = r[0], r[1], r[2]
@@ -271,8 +278,7 @@ for r in RAW:
     else:
         team, lz = None, 0.0
         if isinstance(r[6], (int, float)): pick, src_ = int(r[6]), "Kiper"
-        elif cons(r): pick, src_ = max(kmax + 1, round(math.exp(ic + sl * math.log(cons(r))))), "projected"
-        else: pick, src_ = 120, "projected"
+        else: pick, src_ = PROJ.get(name, 200), "projected"
     x = {"pick": pick, "good": min(4, len(gy)), "land": lz, "pos": pos}
     seas = [{"y": int(y), **{k: int(v) for k, v in s.items() if k in ("py", "ptd", "ry", "rtd", "rec", "recy", "rectd", "gp")}, "g": int(y) in gy}
             for y, s in sorted(c["s"].items())]
@@ -284,7 +290,7 @@ for i, p in enumerate(prospects): p["rank"] = i + 1
 json.dump(CACHE, open(CACHE_F, "w"), separators=(",", ":"))
 out = {"t": int(time.time() * 1000), "draftYear": DY, "hitDef": "top-12 QB, top-24 RB, top-30 WR or top-12 TE in half-PPR points in any of the first three NFL seasons",
        "train": {"n": len(rows), "classes": sorted({x["y"] for x in rows}), "hits": sum(x["hit"] for x in rows), "skipped": skipped},
-       "model": {"names": FN, "w": [round(v, 3) for v in M["w"]], "b": round(M["b"], 3), "loco": FULL, "pickOnly": PICK},
+       "model": {"names": FN, "w": [round(v, 3) if j in USE else 0 for j, v in enumerate(M["w"])], "b": round(M["b"], 3), "loco": FULL, "pickOnly": PICK, "base": FB, "inter": FI, "uses": "inter" if USE == INTER else "base"},
        "patterns": patterns, "prospects": prospects}
 json.dump(out, open("data/claude-board.json", "w"), separators=(",", ":"))
 print("prospects", len(prospects), "found college stats", sum(p["found"] for p in prospects), "top", [(p["n"], p["p"]) for p in prospects[:5]])
