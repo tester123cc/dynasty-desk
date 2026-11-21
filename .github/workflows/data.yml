@@ -24,6 +24,12 @@ jobs:
         timeout-minutes: 30
         env:
           GH_TOKEN: ${{ github.token }}
+      - name: Claude draft board
+        run: python3 -I scripts/claude-board.py
+        continue-on-error: true
+        timeout-minutes: 30
+        env:
+          GH_TOKEN: ${{ github.token }}
       - name: Sample market trades
         run: node scripts/crawl-trades.mjs
         continue-on-error: true
