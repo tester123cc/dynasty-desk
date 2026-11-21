@@ -22,7 +22,7 @@ T0 = time.time(); BUDGET = float(os.environ.get("BOARD_BUDGET_S", "1200"))   # s
 from datetime import date
 
 UA = "dynasty-desk-board"
-def get(url, tries=3):
+def get(url, tries=2):
     for i in range(tries):
         r = subprocess.run(["curl", "-sSfL", "--max-time", "25", "-A", UA, url], capture_output=True)
         if r.returncode == 0:
@@ -93,7 +93,10 @@ def college(name, school, pos, draft_year, fresh_days=None):
     c = {"t": time.time(), "id": None, "s": {}}
     try:
         for aid in find_player(name, school, pos)[:3]:
-            s = {y: v for y, v in espn_seasons(aid).items() if int(y) < draft_year}
+            try:
+                s = {y: v for y, v in espn_seasons(aid).items() if int(y) < draft_year}
+            except Exception:
+                continue   # no college page for this id (often an NFL-only entry); try the next match
             if s:
                 c = {"t": time.time(), "id": aid, "s": s}; break
             time.sleep(.15)
