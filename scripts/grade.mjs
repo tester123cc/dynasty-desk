@@ -145,7 +145,8 @@ for(const ps in biasRaw){const n=projAll[ps].length;if(n>=60&&biasRaw[ps]!=null&
 if(mt.length>=6&&avg(mt.map(t=>t.held))<.4)alerts.push({lvl:"alert",area:"Trade grades",msg:`Only ${Math.round(avg(mt.map(t=>t.held))*100)}% of graded trades still favor the side the site picked a month later (${mt.length} trades).`,fix:"Ask Claude to review the value blend and trade grading."});
 for(const ps in biasRaw){const n=projAll[ps].length;if(n>=60&&biasRaw[ps]!=null&&Math.abs(biasRaw[ps]-1)>=.1&&biasRaw[ps]>=.8&&biasRaw[ps]<=1.2)alerts.push({lvl:"watch",area:"Projections",msg:`${ps} projections run ${Math.round(Math.abs(biasRaw[ps]-1)*100)}% ${biasRaw[ps]<1?"high":"low"}; the site now corrects for it.`,fix:""})}
 
-const G={t:Date.now(),season:SEASON,week:CUR,model:MODEL,prior:PRIOR,
+const liveWeeks=Object.values(PRED.weeks).filter(p=>!p.bt&&p.y===SEASON).map(p=>p.w);
+const G={t:Date.now(),season:SEASON,week:CUR,liveFrom:liveWeeks.length?Math.min(...liveWeeks):CUR+1,model:MODEL,prior:PRIOR,
  win:{all:winSum(gAll),live:winSum(gAll.filter(g=>!g.bt)),bt:winSum(gAll.filter(g=>g.bt))},
  ss:{all:ssSum(ssAll),live:ssSum(ssAll.filter(c=>!c.bt))},
  proj:Object.fromEntries(Object.entries(projAll).map(([k,a])=>[k,{n:a.length,ratio:biasRaw[k],mae:a.length?r1(avg(a.map(x=>Math.abs(x[1]-x[0])))):null}])),
