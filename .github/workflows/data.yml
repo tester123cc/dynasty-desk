@@ -27,7 +27,7 @@ jobs:
       - name: Claude draft board
         run: python3 -I scripts/claude-board.py
         continue-on-error: true
-        timeout-minutes: 30
+        timeout-minutes: 40
         env:
           GH_TOKEN: ${{ github.token }}
       - name: Sample market trades
@@ -40,4 +40,5 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add data
           git diff --cached --quiet || git commit -m "Refresh values $(date -u +%F)"
+          git pull --rebase --autostash || true
           git push

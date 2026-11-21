@@ -16,13 +16,15 @@ Three factors, as asked:
      Unknown before the draft, so prospects get the league average until then.
 Model: logistic regression with position terms, checked by leaving out one draft class at a time.
 """
-import csv, importlib.util, io, json, math, os, re, subprocess, sys, time
+import csv, importlib.util, io, json, math, os, re, subprocess, sys, threading, time
+from concurrent.futures import ThreadPoolExecutor
+T0 = time.time(); BUDGET = float(os.environ.get("BOARD_BUDGET_S", "1200"))   # stop looking up new players after this; the next run continues
 from datetime import date
 
 UA = "dynasty-desk-board"
 def get(url, tries=3):
     for i in range(tries):
-        r = subprocess.run(["curl", "-sSfL", "--max-time", "60", "-A", UA, url], capture_output=True)
+        r = subprocess.run(["curl", "-sSfL", "--max-time", "25", "-A", UA, url], capture_output=True)
         if r.returncode == 0:
             return r.stdout.decode("utf-8", "replace")
         time.sleep(1.5 * (i + 1))
@@ -77,11 +79,17 @@ def find_player(name, school, pos):
             score = (2 if m.group(1) == "23" else 1) + (3 if sch and (sch in sub or sub.startswith(sch)) else 0)
             cands.append((score, m.group(2)))
     return [a for _, a in sorted(cands, reverse=True)]
+LOCK = threading.Lock()
+def save_cache():
+    with LOCK:
+        json.dump(CACHE, open(CACHE_F, "w"), separators=(",", ":"))
 def college(name, school, pos, draft_year, fresh_days=None):
     k = pkey(name) + "|" + str(draft_year)
     c = CACHE.get(k)
     if c and (fresh_days is None or time.time() - c.get("t", 0) < fresh_days * 86400):
         return c
+    if time.time() - T0 > BUDGET:
+        return c or {"t": 0, "id": None, "s": {}, "pending": 1}
     c = {"t": time.time(), "id": None, "s": {}}
     try:
         for aid in find_player(name, school, pos)[:3]:
@@ -91,8 +99,20 @@ def college(name, school, pos, draft_year, fresh_days=None):
             time.sleep(.15)
     except Exception as e:
         c["err"] = str(e)[:80]
-    CACHE[k] = c; time.sleep(.15)
+    with LOCK:
+        CACHE[k] = c
     return c
+def prefetch(items):  # items: (name, school, pos, draft_year, fresh_days); looks players up 6 at a time, saving every 50
+    todo = [x for x in items if not (CACHE.get(pkey(x[0]) + "|" + str(x[3])) and (x[4] is None or time.time() - CACHE[pkey(x[0]) + "|" + str(x[3])].get("t", 0) < x[4] * 86400))]
+    print("college lookups needed", len(todo))
+    done = [0]
+    def one(x):
+        college(*x); done[0] += 1
+        if done[0] % 50 == 0:
+            save_cache(); print("  looked up", done[0], "in", int(time.time() - T0), "s", flush=True)
+    with ThreadPoolExecutor(6) as ex:
+        list(ex.map(one, todo))
+    save_cache()
 def good(pos, s, partial=False):
     f = 1.0
     if partial:  # season in progress: scale to 12 games
@@ -144,6 +164,8 @@ def ranks(year):
     return RANKS[year]
 
 # ---------- training rows ----------
+_prosp_raw = None
+prefetch([(r["pfr_player_name"], r["college"], r["position"], int(r["season"]), None) for r in DP if int(r["season"]) <= LAST_DONE - 1])
 rows = []; skipped = 0
 for r in DP:
     y = int(r["season"])
@@ -157,11 +179,14 @@ for r in DP:
     else:
         hit = 0; best = None
     c = college(r["pfr_player_name"], r["college"], pos, y)
+    if c.get("pending"): continue
     gy = good_years(pos, c["s"])
     rows.append({"y": y, "n": r["pfr_player_name"], "pos": pos, "pick": int(r["pick"]), "team": r["team"], "school": r["college"],
                  "good": min(4, len(gy)), "cf": 1 if c["s"] else 0, "land": round(land_z(r["team"], y), 2), "hit": hit})
-print("training rows", len(rows), "skipped", skipped, "with college stats", sum(x["cf"] for x in rows))
-json.dump(CACHE, open(CACHE_F, "w"), separators=(",", ":"))
+print("training rows", len(rows), "skipped", skipped, "with college stats", sum(x["cf"] for x in rows), "time", int(time.time() - T0))
+save_cache()
+if len([x for x in rows if x["cf"]]) < 150:
+    print("not enough players with college stats yet; the next run continues the lookups"); sys.exit(0)
 rows = [x for x in rows if x["cf"]]   # train only on players whose college stats were found
 
 # ---------- model ----------
@@ -233,6 +258,7 @@ if len(both) >= 5:
 else:
     sl, ic = 1.0, math.log(2)
 kmax = max([r[6] for r in RAW if isinstance(r[6], (int, float))] or [25])
+prefetch([(r[0], r[2], r[1], DY, 6) for r in RAW if r[1] in LIM])
 prospects = []
 for r in RAW:
     name, pos, school = r[0], r[1], r[2]
