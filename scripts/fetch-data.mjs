@@ -45,6 +45,6 @@ if(out.ok.dp){let h={rows:[]};try{h=JSON.parse(fs.readFileSync("data/history.jso
 // this week's Sleeper projections (fallback for the app's Week tab when the browser cannot reach the feed)
 try{const st=await(await get("https://api.sleeper.app/v1/state/nfl")).json(),y=+(st.season||st.league_season),w=+(st.display_week||st.week);
  if(y&&w>=1&&w<=18){const r=await(await get("https://api.sleeper.app/projections/nfl/"+y+"/"+w+"?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE")).json(),P={};
-  (Array.isArray(r)?r:Object.entries(r||{}).map(([k,v])=>({player_id:k,stats:v}))).forEach(x=>{if(!x||!x.player_id)return;const s={},sx=x.stats||{};for(const k in sx){const v=+sx[k];if(v&&isFinite(v))s[k]=Math.round(v*100)/100}if(Object.keys(s).length)P[x.player_id]=x.opponent?{s,o:x.opponent}:{s}});
+  (Array.isArray(r)?r:Object.entries(r||{}).map(([k,v])=>({player_id:k,stats:v}))).forEach(x=>{if(!x||!x.player_id)return;const s={},sx=x.stats||{};if(sx.pts_ppr==null)return;for(const k in sx){const v=+sx[k];if(v&&isFinite(v)&&!/adp/.test(k))s[k]=Math.round(v*100)/100}if(Object.keys(s).length)P[x.player_id]=x.opponent?{s,o:x.opponent}:{s}});
   if(Object.keys(P).length>50){fs.writeFileSync("data/proj.json",JSON.stringify({season:y,week:w,t:Date.now(),p:P}));out.ok.proj=true;pr("proj",y,w,Object.keys(P).length,"shape",Array.isArray(r)?"array":"object")}}}catch(e){pr("proj failed",e.message)}
 pr("done",JSON.stringify(out.ok),"dp",Object.keys(out.dp).length,"kt",Object.keys(out.kt).length);

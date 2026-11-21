@@ -62,7 +62,7 @@ Single-file static web app (`index.html`) served by GitHub Pages at tester123cc.
 
 ## Left to do
 - KeepTradeCut in the nightly job is confirmed (Nov 20 22:09 UTC run: `ok.kt` true, 500 players).
-- **Check v7.16 on live data**: trade suggestions in both leagues, market arrows, that the next nightly run writes `m` into `data/history.json` and `data/proj.json`, and the Week tab against real Sleeper projections and lineups (the projections feed is unofficial and its shape was not seen from the sandbox; both known shapes are handled). Also whether the browser may call the projections feed (CORS); if not, the nightly copy is used.
+- **Check v7.16 on live data**: trade suggestions in both leagues, market arrows, that the next nightly run writes `m` into `data/history.json` and `data/proj.json`, and the Week tab against real Sleeper projections and lineups (the data job reached the feed on Nov 21: a list with `opponent` and stat keys matching scoring settings; only entries with `pts_ppr` are kept). Also whether the browser may call the projections feed (CORS); if not, the nightly copy is used.
 - **Live draft sync on a real draft**: untested against a live Sleeper draft, a real 2027 renewal, a long draft, or a phone sleeping mid-draft. Also, trades made in the renewed 2027 league are not in the board's "my picks" list (it reads the 2026 league); the draft's own `traded_picks` covers who is on the clock.
 - **More layout cleanup candidates**: Market (5.0 screens offline), Draft → Board (4.3), Roster (3.8).
 - Re-rank rookies after the April 29, 2027 NFL draft; refresh rookie rankings (they go stale weekly; Dynasty Nerds only publishes a top 25). The 2027 Board's data is dated Nov 15.

@@ -371,7 +371,7 @@ async function refreshInjuries(){if(INJ._t&&Date.now()-INJ._t<4*3600e3)return fa
  Points use the league's own scoring settings (LGI[lg].sc) when synced, else Sleeper's half/full PPR totals. */
 let PROJ=null,PJST="";try{PROJ=JSON.parse(localStorage.getItem("dd2proj"))}catch(e){}
 let MU={};try{MU=JSON.parse(localStorage.getItem("dd2mu"))||{}}catch(e){}
-function projNorm(r){const P={};(Array.isArray(r)?r:Object.entries(r||{}).map(([k,v])=>({player_id:k,stats:v}))).forEach(x=>{if(!x||!x.player_id)return;const s={},st=x.stats||{};for(const k in st){const v=+st[k];if(v&&isFinite(v))s[k]=v}P[x.player_id]=x.opponent?{s,o:x.opponent}:{s}});return P}
+function projNorm(r){const P={};(Array.isArray(r)?r:Object.entries(r||{}).map(([k,v])=>({player_id:k,stats:v}))).forEach(x=>{if(!x||!x.player_id)return;const s={},st=x.stats||{};if(st.pts_ppr==null&&st.pts_half_ppr==null)return;for(const k in st){const v=+st[k];if(v&&isFinite(v)&&!/adp/.test(k))s[k]=v}P[x.player_id]=x.opponent?{s,o:x.opponent}:{s}});return P}
 async function loadProj(force){if(WEEK==null||PJST==="loading")return;const y=SEAS();
  if(!force&&PROJ&&PROJ.w===WEEK&&PROJ.y===y&&Date.now()-PROJ.t<3600e3)return;PJST="loading";let p=null,src="";
  try{const r=await fetch("https://api.sleeper.app/projections/nfl/"+y+"/"+WEEK+"?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE");if(r.ok){p=projNorm(await r.json());src="Sleeper"}}catch(e){}
