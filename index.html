@@ -579,7 +579,7 @@ const IC={home:svg('<path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/>'),
  grades:svg('<path d="M9 11l3 3 8-8"/><path d="M20 12v7a2 2 0 01-2 2H6a2 2 0 01-2-2V5a2 2 0 012-2h9"/>'),
  sliders:svg('<path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/>')};
 const NAV=[["home","Home"],["team","Team"],["trade","Trade"],["draft","Draft"],["league","League"],["grades","Grades"]];
-const SUBS={team:[["week","Week"],["lineup","Lineup"],["roster","Roster"],["outlook","Outlook"],["free","FA"]],trade:[["ideas","Ideas"],["build","Builder"]],draft:[["order","Order"],["picks","My picks"],["board","Board"],["rookies","2027 Board"]],league:[["power","Power"],["pos","Positions"],["trades","Trades"],["market","Market"],["h2h","H2H"]],grades:[["card","Report card"],["log","Week by week"]]};
+const SUBS={team:[["week","Week"],["lineup","Lineup"],["roster","Roster"],["outlook","Outlook"],["free","FA"]],trade:[["ideas","Ideas"],["build","Builder"]],draft:[["order","Order"],["picks","My picks"],["board","Board"],["rookies","2027"],["claude","Claude"]],league:[["power","Power"],["pos","Positions"],["trades","Trades"],["market","Market"],["h2h","H2H"]],grades:[["card","Report card"],["log","Week by week"]]};
 const fmt=n=>Math.round(n).toLocaleString();
 const tn=(lg,n)=>(TEAMS[lg]&&TEAMS[lg][n])||("Team "+n);
 const pctLab=x=>x>0&&x<.005?"<1%":x<1&&x>.995?">99%":Math.round(x*100)+"%";
@@ -889,6 +889,22 @@ function sellCard(L,picks){const c=seasonCurve();if(!c)return"";const MN=["Jan",
  const chg=mineR.map(r=>{const m=mv(pkey(ny+" "+["","1st","2nd","3rd"][r]));return m==null?"":`<small style="display:block">${ny} ${["","1st","2nd","3rd"][r]}s: ${m>=0?"+":""}${Math.round(m*100)}% over the last 4 weeks</small>`}).join("");
  const gap=cur?Math.round((pk.v/cur.v-1)*100):null;
  return`<div class="card"><h2>When to sell picks</h2>${svgc}<p style="margin:6px 0 0">Next year's firsts have peaked in <b>${MN[pk.m]}</b>${gap!=null&&gap>0?`, about <b>${gap}%</b> above ${MN[now]}`:""}.</p>${chg}${info(`<p>Value of the upcoming draft's first-round picks through the year, ${c.years} seasons of DynastyProcess history, each season scaled to its own median (100). Picks usually climb as the rookie class takes shape and the draft nears, then become players. If you plan to sell, the peak month is the usual best window; if you plan to buy, the low months are.</p>`)}</div>`}
+/* Claude's draft board: data/claude-board.json from scripts/claude-board.py (history-trained hit chances) */
+let CB=null,CBL=false;
+function loadCB(){if(CBL)return;CBL=true;fetch("data/claude-board.json?"+Math.floor(Date.now()/36e5)).then(r=>r.ok?r.json():null).catch(()=>null).then(j=>{CB=j;VER++;try{render()}catch(e){}})}
+const cbLine=(pos,s)=>pos==="QB"?`${fmt(s.py||0)} pass yds, ${s.ptd||0} TD${s.ry?", "+fmt(s.ry)+" rush":""}`:pos==="RB"?`${fmt((s.ry||0)+(s.recy||0))} scrimmage yds, ${(s.rtd||0)+(s.rectd||0)} TD`:`${s.rec||0} rec, ${fmt(s.recy||0)} yds, ${s.rectd||0} TD`;
+function pClaude(){loadCB();if(!CB)return`<div class="card"><h2>Claude's board</h2><p class="note">${CBL?"Loading…":""} Built nightly from history; if this stays empty the job has not run yet.</p></div>`;
+ const f=UI.cbp||"ALL",N=UI.cbN||25,list=CB.prospects.filter(p=>f==="ALL"||p.pos===f),M=CB.model,pre=!CB.prospects.some(p=>p.pickSrc==="actual");
+ const row=p=>{const op=UI.cbx===p.n,d=p.cons!=null?Math.round(p.cons)-p.rank:null;
+  return`<div class="li tap ${op?"open":""}" data-act="cbx" data-id="${esc(p.n)}" style="display:block"><div class="lr"><div class="nm"><b>${p.rank}. ${esc(p.n)}</b> <small>${p.pos} · ${esc(p.school)}</small><br><small>${p.good} good college season${p.good===1?"":"s"} · ${p.pickSrc==="actual"?"pick "+p.pick+" by "+esc(p.team):"proj. pick ~"+p.pick+(p.pickSrc==="Kiper"?" (Kiper)":"")}${p.pickSrc==="actual"&&p.land?" · "+(p.land>=.6?"strong":p.land<=-.6?"weak":"average")+" offense":""}${d!=null&&Math.abs(d)>=3?` · <span class="${d>0?"up":"dn"}">${d>0?"▲":"▼"}${Math.abs(d)} vs consensus</span>`:""}</small></div><span class="val">${Math.round(p.p*100)}%</span></div>
+  ${op?`<div style="margin-top:6px">${p.found?p.seasons.map(s=>`<small style="display:block">${s.g?'<span class="tag good">good</span> ':""}${s.y}: ${cbLine(p.pos,s)}${s.y===CB.draftYear-1?" (season in progress)":""}</small>`).join(""):'<small class="note">No college stats found for him, so he counts as 0 good seasons.</small>'}${p.cons!=null?`<small class="note" style="display:block;margin-top:4px">Consensus dynasty rank ${Math.round(p.cons)} (2027 Board sources)</small>`:""}</div>`:""}</div>`};
+ const pat=(t,a)=>`<h3 style="margin:10px 0 4px">${t}</h3>${a.filter(x=>x.n).map(x=>`<div class="lr"><small>${esc(x.lab)}</small><small><b>${pc0(x.hit)}</b> hit <span class="note">of ${x.n}</span></small></div>`).join("")}`;
+ const w=M.w,imp=[0,1,2].map(i=>({n:M.names[i],w:w[i]})).sort((a,b)=>Math.abs(b.w)-Math.abs(a.w));
+ return`<div class="card"><h2>Claude's 2027 board</h2><div class="fsel"><label>Position<select data-chg="cbp">${["ALL","QB","RB","WR","TE"].map(x=>`<option value="${x}" ${f===x?"selected":""}>${x==="ALL"?"All":x}</option>`).join("")}</select></label></div>
+ <p class="note" style="margin:4px 0 8px">Chance to become a startable fantasy player, from what predicted it for ${fmt(CB.train.n)} rookies drafted ${CB.train.classes[0]}–${CB.train.classes.at(-1)}.${pre?" Draft picks are projections until the NFL draft; team fit counts once teams are known.":""}</p>
+ ${list.slice(0,N).map(row).join("")}${list.length>N?`<button class="btn ghost sm morebtn" data-act="cbmore">Show more</button>`:""}${info(`<p>Hit means a ${esc(CB.hitDef)}. Three factors, weighed by fitting them to history: years of good college stats before the draft (ESPN college stats), NFL draft pick, and the drafting team's scoring the year before. Before the NFL draft the pick is Kiper's big board rank or, for players he does not list, a projection from the dynasty consensus; every prospect gets an average landing spot until the draft.</p><p>Tap a player for his college seasons. Arrows compare Claude's rank with the 2027 Board's consensus.</p>`)}</div>
+ <div class="card"><h2>What history says</h2>${pat("By draft pick",CB.patterns.pick)}${pat("By good college seasons",CB.patterns.good)}${pat("Same, picks in rounds 1–2 only",CB.patterns.goodDay12)}${pat("By landing offense",CB.patterns.land)}
+ <p class="note" style="margin-top:10px">Weight in the model, strongest first: ${imp.map(x=>esc(x.n)+" "+(x.w>=0?"+":"−")+Math.abs(x.w).toFixed(2)).join(", ")}. Tested on each draft class it did not see: ${M.loco.auc!=null?"ranks a hit above a miss "+Math.round(M.loco.auc*100)+"% of the time":""} (draft pick alone: ${M.pickOnly.auc!=null?Math.round(M.pickOnly.auc*100)+"%":"–"}); Brier ${M.loco.brier} vs ${M.pickOnly.brier}.</p></div>`}
 /* ---------- Draft ---------- */
 function pOrder(){const {L,R,me}=C(),st=STAND[L.id];if(!st)return empty("No standings loaded yet.");
  const np=6,ord=orderFrom(st,np),hl=HIST[L.id]||{};
@@ -1083,7 +1099,7 @@ function pMore(){const {L,R}=C(),w=(S.watch||[]).map(byId).filter(Boolean);
  <details class="card"><summary>Data and status</summary><p class="note">Rosters: ${esc(SYNCINFO)}<br>Values: ${esc(VALINFO)}</p><p><button class="btn sm" data-act="sync">Sync with Sleeper</button> <button class="btn sm ghost" data-act="refvals">Refresh values</button></p><p><button class="btn sm ghost" data-act="reset">Reset saved data on this device</button></p></details>`}
 
 /* ---------- render + events ---------- */
-const PAGES={"team.week":pWeek,"team.lineup":pLineup,"team.roster":pRoster,"team.outlook":pOutlook,"league.market":pMarket,"team.free":pFree,"trade.ideas":pIdeas,"trade.build":pBuild,"draft.order":pOrder,"draft.picks":pPicks,"draft.board":pBoard,"draft.rookies":()=>"","league.power":pPower,"league.pos":pPos,"league.trades":pTrades,"league.h2h":pH2H,"grades.card":pGrades,"grades.log":pGradeLog};
+const PAGES={"team.week":pWeek,"team.lineup":pLineup,"team.roster":pRoster,"team.outlook":pOutlook,"league.market":pMarket,"team.free":pFree,"trade.ideas":pIdeas,"trade.build":pBuild,"draft.order":pOrder,"draft.picks":pPicks,"draft.board":pBoard,"draft.rookies":()=>"","draft.claude":pClaude,"league.power":pPower,"league.pos":pPos,"league.trades":pTrades,"league.h2h":pH2H,"grades.card":pGrades,"grades.log":pGradeLog};
 function render(){
  try{hdr();navr();renderSheet()}catch(e){console.error(e)}
  let h;try{h=UI.tab==="more"?pMore():UI.tab==="home"&&!rbOn()?pHome():segr()+PAGES[UI.tab+"."+UI.sub[UI.tab]]();if(UI.tab==="home")h=alertBanner(C().me)+h}catch(e){console.error(e);h=`<div class="card"><p class="note">Something went wrong on this page (${esc(e.message)}). Try Sync, or reset in More.</p></div>`}
@@ -1126,6 +1142,8 @@ function doAct(a,d){const {L,R,me}=C(),T=S.trade;
  case"shx":UI.shared=null;return render();
  case"recap":return copyText(RECAP);
  case"fa":UI.fa=d.v;UI.faN=15;return render();
+ case"cbx":UI.cbx=UI.cbx===d.id?null:d.id;return render();
+ case"cbmore":UI.cbN=(UI.cbN||25)+40;return render();
  case"famore":UI.faN=(UI.faN||15)+25;return render();
  case"trmore":UI.trN=(UI.trN||8)+20;return render();
  case"psim":{const tr=(PENDING[L.id]||[])[+d.i];if(!tr||!me)return;const sd=tradeSides(L,tr),mn=sd.find(s=>s.rid===me.n),o=sd.find(s=>s!==mn),par=o&&R.find(t=>t.n===o.rid);if(!mn||!par||sd.length!==2){toast("Needs a two-team trade that includes you");return}UI.pwi={i:+d.i,html:wiHtml(L,R,me,par,{give:o.ids,get:mn.ids})};return render()}
@@ -1155,6 +1173,7 @@ function doChg(a,t){const {L,R}=C(),T=S.trade;
  if(a==="ft"){UI.ft=t.value;return render()}
  if(a==="partner"){T.partner=+t.value;T.get=[];save();return render()}
  if(a==="tm"){UI.tm=t.value;UI.trN=8;return render()}
+ if(a==="cbp"){UI.cbp=t.value;UI.cbN=25;return render()}
  if(a==="fa"){UI.fa=t.value;UI.faN=15;return render()}
  if(a==="mq"){MKF.q=t.value;return render()}
  if(a==="mu1"){UI.mu.a=+t.value;return render()}
