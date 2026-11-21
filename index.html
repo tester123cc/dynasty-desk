@@ -366,6 +366,64 @@ function sidOfPid(id){if(!SIDREV){SIDREV={};for(const s in SIDMAP)(SIDREV[SIDMAP
 const ibx=id=>{const s=sidOfPid(id);return s&&INJ[s]?` <span class="tag bad" title="${esc(INJ[s])}">${esc(INJ[s])}</span>`:""};
 async function refreshInjuries(){if(INJ._t&&Date.now()-INJ._t<4*3600e3)return false;
  try{const a=await jget("/players/nfl"),o={_t:Date.now()};for(const sid in SIDMAP){const x=a[sid];if(!x)continue;if(x.team&&SIDMAP[sid])TMX[SIDMAP[sid]]=x.team;if(x.birth_date&&SIDMAP[sid]){const p=SM.get(SIDMAP[sid]);if(p&&!(p.age>0))BDX[SIDMAP[sid]]=x.birth_date}const st=x.injury_status||(["Injured Reserve","Suspended","PUP"].includes(x.status)?x.status:"");if(st)o[sid]=st+(x.injury_body_part?" ("+x.injury_body_part+")":"")}INJ=o;SIDREV=null;applyBD();VER++;try{localStorage.setItem("dd2bd",JSON.stringify(BDX));localStorage.setItem("dd2tm",JSON.stringify(TMX));localStorage.setItem("dd2inj",JSON.stringify(o))}catch(e){}return true}catch(e){return false}}
+/* ===== v7.17: this week's projections, start/sit and matchup =====
+ Projections come from Sleeper's projections feed (browser), or the nightly copy in data/proj.json.
+ Points use the league's own scoring settings (LGI[lg].sc) when synced, else Sleeper's half/full PPR totals. */
+let PROJ=null,PJST="";try{PROJ=JSON.parse(localStorage.getItem("dd2proj"))}catch(e){}
+let MU={};try{MU=JSON.parse(localStorage.getItem("dd2mu"))||{}}catch(e){}
+function projNorm(r){const P={};(Array.isArray(r)?r:Object.entries(r||{}).map(([k,v])=>({player_id:k,stats:v}))).forEach(x=>{if(!x||!x.player_id)return;const s={},st=x.stats||{};for(const k in st){const v=+st[k];if(v&&isFinite(v))s[k]=v}P[x.player_id]=x.opponent?{s,o:x.opponent}:{s}});return P}
+async function loadProj(force){if(WEEK==null||PJST==="loading")return;const y=SEAS();
+ if(!force&&PROJ&&PROJ.w===WEEK&&PROJ.y===y&&Date.now()-PROJ.t<3600e3)return;PJST="loading";let p=null,src="";
+ try{const r=await fetch("https://api.sleeper.app/projections/nfl/"+y+"/"+WEEK+"?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE");if(r.ok){p=projNorm(await r.json());src="Sleeper"}}catch(e){}
+ if(!p||Object.keys(p).length<50){try{const r=await fetch("data/proj.json?"+Math.floor(Date.now()/36e5));if(r.ok){const j=await r.json();if(+j.week===WEEK&&+j.season===y&&j.p){p=j.p;src="nightly copy"}}}catch(e){}}
+ if(p&&Object.keys(p).length>=50){PROJ={y,w:WEEK,t:Date.now(),p,src};PJST="";try{localStorage.setItem("dd2proj",JSON.stringify(PROJ))}catch(e){}}else PJST="fail";
+ VER++;try{render()}catch(e){}}
+const projOk=()=>!!(PROJ&&PROJ.w===WEEK&&PROJ.y===SEAS());
+function sidsOf(id){sidOfPid(id);return SIDREV[id]||[]}
+function ptsOf(st,lg){const sc=(LGI[lg]||{}).sc,ref=lg==="A"?st.pts_half_ppr:st.pts_ppr;
+ if(sc){let t=0,hit=0;for(const k in st){if(sc[k]!=null&&!/^pts_/.test(k)){t+=sc[k]*st[k];hit++}}if(hit&&!(ref!=null&&(t<-5||t>2*ref+8)))return t}
+ return ref!=null?ref:st.pts_ppr||0}
+/* projected points this week for one of our player ids; 0 for Out, IR, suspended; doubtful counts 30% */
+function wkProj(id,lg){if(!projOk())return null;let st=null,opp="";for(const s of sidsOf(id)){const x=PROJ.p[s];if(x){st=x.s;opp=x.o||"";break}}
+ const inj=(sidsOf(id).map(s=>INJ[s]).find(Boolean)||"").split(" ")[0];let v=st?ptsOf(st,lg):0;
+ if(/^(Out|IR|Injured|Suspended|PUP|NA)/.test(inj))v=0;else if(inj==="Doubtful")v*=.3;
+ const tm=TMX[id]||(byId(id)||{}).tm,bye=BYEW[TNORM[tm]||tm]===WEEK;if(bye)v=0;
+ return{v:Math.round(v*10)/10,opp,bye,inj}}
+function bestWk(ids,lg){const sl=SLOTS[lg],ps=ids.map(id=>{const p=byId(id),w=p&&p.pos!=="PICK"?wkProj(id,lg):null;return w?{p,v:w.v,w}:null}).filter(Boolean).sort((a,b)=>b.v-a.v),used=new Set(),out=[];
+ const take=(lab,el)=>{const x=ps.find(y=>!used.has(y.p.id)&&el.includes(y.p.pos));if(x)used.add(x.p.id);out.push([lab,x||null])};
+ ["QB","RB","WR","TE"].forEach(pos=>{for(let i=0;i<sl[pos];i++)take(pos,[pos])});
+ for(let i=0;i<sl.FLEX;i++)take("FLEX",["RB","WR","TE"]);for(let i=0;i<(sl.SF||0);i++)take("SF",["QB","RB","WR","TE"]);
+ return{out,used,ps,tot:out.reduce((s,[,x])=>s+(x?x.v:0),0)}}
+const phi=z=>{const t=1/(1+.2316419*Math.abs(z)),d=.3989423*Math.exp(-z*z/2),p=d*t*(.3193815+t*(-.3565638+t*(1.781478+t*(-1.821256+t*1.330274))));return z>0?1-p:p};
+const sdOf=v=>.4*v+1.5;
+/* everything the week page and the Home card need */
+function wkCtx(L,R,me){if(!me||WEEK==null||!projOk())return null;return memo("wk|"+L.id+"|"+me.n+"|"+WEEK,()=>{const lg=L.id,mu=MU[lg]&&MU[lg].w===WEEK?MU[lg].m:null;
+ const avail=t=>t.p.filter(id=>!(t.res||[]).includes(id)&&!(t.tx||[]).includes(id));
+ const B=bestWk(avail(me),lg),mine=mu&&mu[me.n],set=(mine&&mine.st&&mine.st.length?mine.st:me.st||[]).filter(Boolean);
+ const setTot=set.reduce((s,id)=>s+((wkProj(id,lg)||{v:0}).v),0);
+ const oppN=mine&&mine.mid!=null?+Object.keys(mu).find(k=>+k!==me.n&&mu[k].mid===mine.mid):null,opp=oppN!=null?R.find(t=>t.n===oppN):null;
+ let ob=null,oTot=0,oSet=[];if(opp){ob=bestWk(avail(opp),lg);oSet=((mu[opp.n]||{}).st||opp.st||[]).filter(Boolean);oTot=oSet.length?oSet.reduce((s,id)=>s+((wkProj(id,lg)||{v:0}).v),0):ob.tot}
+ const myTot=set.length?Math.max(setTot,0):B.tot,var_=a=>a.reduce((s,v)=>s+sdOf(v)**2,0);
+ const win=opp?phi((B.tot-oTot)/Math.sqrt(var_(B.out.map(([,x])=>x?x.v:0))+var_((oSet.length?oSet.map(id=>(wkProj(id,lg)||{v:0}).v):ob.out.map(([,x])=>x?x.v:0)))||1)):null;
+ const st=new Set(set),ins=[...B.used].filter(id=>set.length&&!st.has(id)),outs=set.filter(id=>!B.used.has(id));
+ const flag=set.filter(id=>{const w=wkProj(id,lg);return w&&(w.v===0||w.bye||/^(Out|IR|Doubtful|Suspended)/.test(w.inj))});
+ return{lg,B,set,setTot,myTot,opp,oTot,oSet,win,ins,outs,flag,gain:set.length?B.tot-setTot:0,live:mine&&(mine.pts||0)+(opp&&mu[opp.n]?mu[opp.n].pts||0:0)>0?{a:mine.pts||0,b:opp&&mu[opp.n]?mu[opp.n].pts||0:0}:null}})}
+function pWeek(){const {L,R,me}=C();if(!me)return empty("Choose your team first.","Choose team","who");
+ if(WEEK==null)return empty("Sync with Sleeper to load this week.");
+ if(!projOk()){if(PJST!=="fail")loadProj();return`<div class="card"><h2>Week ${WEEK}</h2><p class="note">${PJST==="fail"?"Could not get this week's projections from Sleeper or the nightly copy. Try Sync again later.":"Getting week "+WEEK+" projections…"}</p></div>`}
+ const X=wkCtx(L,R,me),lg=L.id,f1=v=>v.toFixed(1),nm=id=>esc(pname(id));
+ const wl=id=>{const w=wkProj(id,lg);return w?(w.bye?"bye":w.opp?"vs "+esc(w.opp):""):""};
+ let h="";
+ if(X.opp){h+=`<div class="card"><h2>Week ${WEEK} vs ${esc(tn(lg,X.opp.n))}</h2><div class="two" style="margin-top:6px"><div><small class="note">You (best lineup)</small><div class="big">${f1(X.B.tot)}</div></div><div><small class="note">${esc(tn(lg,X.opp.n))}</small><div class="big">${f1(X.oTot)}</div></div></div>
+ <p style="margin:8px 0 0"><b>Win chance ${pctLab(X.win)}</b>${X.live?` · score now ${f1(X.live.a)}–${f1(X.live.b)}`:""}</p>${info(`<p>Projected points from ${esc(PROJ.src)} for week ${WEEK}, scored with ${(LGI[lg]||{}).sc?"this league's scoring settings":"Sleeper's "+(lg==="A"?"half":"full")+" PPR totals"}. Their side uses the lineup they have set in Sleeper${X.oSet.length?"":" (none set yet, so their best lineup)"}. Win chance assumes each player's score varies by about 40% of his projection. Out, IR, suspended and bye players count as zero; doubtful players count 30%.</p>`)}</div>`}
+ if(X.set.length){h+=X.ins.length||X.flag.length?`<div class="card"><h2>Lineup changes <span class="cnt">${X.ins.length}</span></h2>${X.ins.length?`<p class="note" style="margin:0 0 6px">Your Sleeper lineup projects ${f1(X.setTot)}; the best one projects ${f1(X.B.tot)} (+${f1(X.gain)}).</p>`:""}${(()=>{const left=X.outs.slice(),pr=X.ins.map(id=>{const ps=(byId(id)||{}).pos;let j=left.findIndex(o=>(byId(o)||{}).pos===ps);if(j<0)j=0;return[id,left.splice(j,1)[0]]});return pr})().map(([id,o])=>{return`<div class="li"><div class="nm"><span class="tag good">Start</span> ${nm(id)}${ibx(id)} <small>${f1(wkProj(id,lg).v)}</small>${o?`<br><small><span class="tag warn">Bench</span> ${nm(o)}${ibx(o)} ${f1(wkProj(o,lg).v)}</small>`:""}</div></div>`}).join("")}${X.flag.filter(id=>!X.outs.includes(id)).map(id=>`<p class="note">${nm(id)} is in your lineup but ${(wkProj(id,lg)||{}).bye?"on bye":"listed "+esc((wkProj(id,lg)||{}).inj||"out")}.</p>`).join("")}<p class="note" style="margin-top:8px">Make the change in the Sleeper app; this page cannot edit your lineup.</p></div>`:`<div class="card"><p style="margin:0"><span class="tag good">Set</span> Your Sleeper lineup is already the best one (${f1(X.setTot)} projected).</p></div>`}
+ h+=`<div class="card"><h2>Best lineup</h2>${X.B.out.map(([s,x])=>x?`<div class="li"><div class="nm"><span class="slot">${s}</span>${nm(x.p.id)}${ibx(x.p.id)}${X.set.length&&!X.set.includes(x.p.id)?' <span class="tag good">Start</span>':""}<br><small style="margin-left:46px">${x.p.pos}${wl(x.p.id)?" · "+wl(x.p.id):""}</small></div><span class="val">${f1(x.v)}</span></div>`:`<div class="li"><div class="nm"><span class="slot">${s}</span><span class="tag bad">Empty</span></div></div>`).join("")}</div>`;
+ const lowBy=pos=>{const c=X.B.out.filter(([s,x])=>x&&(s===pos||s==="SF"||(s==="FLEX"&&pos!=="QB"))).map(([,x])=>x.v);return c.length?Math.min(...c):null};
+ const close=X.B.ps.filter(x=>!X.B.used.has(x.p.id)&&x.v>0).map(x=>({x,d:lowBy(x.p.pos)!=null?lowBy(x.p.pos)-x.v:99})).filter(z=>z.d<=2.5).slice(0,5);
+ if(close.length)h+=`<details class="card"><summary>Close calls · ${close.length}</summary>${close.map(z=>`<div class="li"><div class="nm">${nm(z.x.p.id)}${ibx(z.x.p.id)}<br><small>${z.x.p.pos}${wl(z.x.p.id)?" · "+wl(z.x.p.id):""} · ${f1(z.d)} behind your weakest starter he could replace</small></div><span class="val">${f1(z.x.v)}</span></div>`).join("")}</details>`;
+ return h}
+function weekCard(L,R,me){const X=wkCtx(L,R,me);if(!X||!X.opp)return"";
+ return`<div class="card"><div class="lr"><div class="nm"><b>Week ${WEEK} vs ${esc(tn(L.id,X.opp.n))}</b><br><small>${pctLab(X.win)} to win · ${X.B.tot.toFixed(1)} to ${X.oTot.toFixed(1)} projected${X.ins.length?" · "+X.ins.length+" lineup change"+(X.ins.length>1?"s":""):X.set.length?" · lineup set":""}</small></div><button class="btn sm" data-act="go" data-t="team" data-s="week">Start/sit</button></div></div>`}
 function projF(p,y){return p.pos==="PICK"?1:fct(p,y)}
 const BYE={5:["CAR","KC"],6:["CIN","DET","MIA","MIN"],7:["BUF","JAX","LAC","WAS"],8:["HOU","NO","NYG","SF"],9:["PIT","TEN"],10:["CHI","DEN","PHI","TB"],11:["ATL","CLE","GB","LAR","NE","SEA"],13:["BAL","IND","LV","NYJ"],14:["ARI","DAL"]},BYEW={},TNORM={JAC:"JAX",WSH:"WAS",LVR:"LV",ARZ:"ARI",BLT:"BAL",CLV:"CLE",HST:"HOU",LA:"LAR"};
 for(const w in BYE)BYE[w].forEach(t=>BYEW[t]=+w);
@@ -436,7 +494,7 @@ function sinceHtml(prev,cur){
 function afterSync(){
  if(!SINCE_DONE){SINCE_DONE=true;let prev=null;try{prev=JSON.parse(localStorage.getItem("dd2last"))}catch(e){}
   const cur=snap();SINCE=sinceHtml(prev,cur);if(!prev||Date.now()-prev.t>4*3600e3){try{localStorage.setItem("dd2last",JSON.stringify(cur))}catch(e){}}render()}
- rbSend();refreshInjuries().then(ch=>{recordLedger();if(ch)render()})}
+ rbSend();loadProj();refreshInjuries().then(ch=>{recordLedger();if(ch){VER++;render()}})}
 function copyText(t){const done=()=>toast("Copied to clipboard");
  if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(t).then(done).catch(()=>{});else{const a=document.createElement("textarea");a.value=t;document.body.appendChild(a);a.select();try{document.execCommand("copy");done()}catch(e){}a.remove()}}
 const SIDMAP={"13269":"p_fernando_mendoza","13275":"p_ty_simpson","13404":"p_garrett_nussmeier","13272":"p_carson_beck","13303":"p_cade_klubnik","13289":"p_drew_allar","13425":"p_jalon_daniels","13287":"p_jeremiyah_love","13286":"p_jadarian_price","13337":"p_emmett_johnson","13424":"p_seth_mcgowan","13288":"p_nicholas_singleton","13345":"p_jonah_coleman","13405":"p_kaytron_allen","13347":"p_demond_claiborne","13305":"p_mike_washington","13414":"p_kaelon_black","13279":"p_carnell_tate","13281":"p_jordyn_tyson","13294":"p_makai_lemon","13346":"p_denzel_boston","13298":"p_kc_concepcion","13276":"p_omar_cooper","13274":"p_germie_bernard","13268":"p_elijah_sarratt","13311":"p_chris_bell","13320":"p_zachariah_branch","13402":"p_skyler_bell","13353":"p_chris_brazzell","13333":"p_deion_burks","13285":"p_malachi_fields","13301":"p_antonio_williams","13417":"p_dezhaun_stribling","13293":"p_jakobi_lane","13413":"p_cyrus_allen","13420":"p_bryce_lance","13317":"p_ted_hurst","13411":"p_zavion_thomas","13297":"p_reggie_virgil","13394":"p_josh_cameron","13338":"p_kevin_coleman","13380":"p_brenen_thompson","13533":"p_barion_brown","13477":"p_colbie_young","13330":"p_kenyon_sadiq","13349":"p_eli_stowers","13282":"p_jack_endries","13278":"p_max_klare","13400":"p_justin_joly","13322":"p_sam_roush","13319":"p_oscar_delp","13307":"p_marlin_klein","13296":"p_caleb_douglas","13421":"p_eli_raridon","13524":"p_justin_jefferson","13408":"p_tanner_koziol","13412":"p_kendrick_law","13302":"p_adam_randall","13335":"p_cole_payton","13306":"p_taylen_green","13423":"p_eli_heidenreich","13329":"p_malik_benson","13770":"p_j_michael_sturdivant","13415":"p_haynes_king","12522":"p_cam_ward","12524":"p_shedeur_sanders","12508":"p_jaxson_dart","12510":"p_jalen_milroe","12500":"p_quinn_ewers","12470":"p_riley_leonard","12511":"p_will_howard","12486":"p_dillon_gabriel","12545":"p_tyler_shough","12527":"p_ashton_jeanty","12529":"p_treveyon_henderson","12507":"p_omarion_hampton","12481":"p_cam_skattebo","12476":"p_devin_neal","12469":"p_dylan_sampson","12504":"p_kaleb_johnson","12455":"p_brashard_smith","12512":"p_quinshon_judkins","12490":"p_bhayshul_tuten","12474":"p_woody_marks","12467":"p_jordan_james","12531":"p_trevor_etienne","12543":"p_tahj_brooks","12495":"p_ollie_gordon","12471":"p_dj_giddens","12544":"p_lequint_allen","11569":"p_jarquez_hunter","12534":"p_kyle_monangai","12489":"p_rj_harvey","12457":"p_jaydon_blue","12519":"p_luther_burden","12526":"p_tetairoa_mcmillan","12509":"p_tre_harris","12499":"p_elic_ayomanor","12530":"p_travis_hunter","12501":"p_matthew_golden","12503":"p_isaiah_bond","12483":"p_jack_bech","12485":"p_tez_johnson","12536":"p_jaylin_noel","12514":"p_emeka_egbuka","12492":"p_pat_bryant","12484":"p_jayden_higgins","12505":"p_jalen_royals","12541":"p_donte_thornton","12482":"p_savion_williams","12496":"p_tai_felton","12497":"p_tory_horton","12493":"p_oronde_gadsden","12518":"p_tyler_warren","12506":"p_harold_fannin","12517":"p_colston_loveland","12502":"p_gunnar_helm","12498":"p_mason_taylor","12487":"p_terrance_ferguson","12521":"p_elijah_arroyo","12473":"p_mitchell_evans","12547":"p_kyle_williams","12535":"p_isaac_teslaa","12540":"p_chimere_dike","12641":"p_jaylin_lane","12634":"p_jordan_watkins","12670":"p_keandre_lambert_smith","12718":"p_konata_mumpfield","12533":"p_jacory_croskey_merritt","13264":"p_dohnte_meyers","11560":"p_caleb_williams","11564":"p_drake_maye","11566":"p_jayden_daniels","11563":"p_bo_nix","11559":"p_michael_penix","11565":"p_jj_mccarthy","11557":"p_joe_milton","11562":"p_spencer_rattler","11586":"p_blake_corum","11589":"p_trey_benson","11579":"p_audric_estime","11576":"p_braelon_allen","11583":"p_jonathon_brooks","11584":"p_bucky_irving","11577":"p_will_shipley","11575":"p_ray_davis","11581":"p_marshawn_lloyd","12048":"p_george_holani","11643":"p_jaylen_wright","11628":"p_marvin_harrison","11632":"p_malik_nabers","11620":"p_rome_odunze","11637":"p_keon_coleman","11631":"p_brian_thomas","11627":"p_troy_franklin","11624":"p_xavier_worthy","11629":"p_devontez_walker","11638":"p_ricky_pearsall","11625":"p_adonai_mitchell","11635":"p_ladd_mcconkey","11618":"p_jalen_mcmillan","11630":"p_roman_wilson","11623":"p_jordan_whittington","11650":"p_luke_mccaffrey","11626":"p_xavier_legette","11604":"p_brock_bowers","11599":"p_cade_stover","11600":"p_jatavion_sanders","11596":"p_ben_sinnott","11592":"p_erick_all","11597":"p_theo_johnson","11610":"p_malik_washington","11651":"p_isaac_guerendo","11603":"p_aj_barner","11570":"p_rasheen_ali","11655":"p_tyrone_tracy","11571":"p_isaiah_davis","11647":"p_kimani_vidal","11783":"p_ryan_flournoy","11834":"p_devaughn_vele","11646":"p_jalen_coker","9230":"p_tanner_mckee","9228":"p_bryce_young","9999":"p_will_levis","9758":"p_cj_stroud","9229":"p_anthony_richardson","10866":"p_aidan_oconnell","9509":"p_bijan_robinson","9221":"p_jahmyr_gibbs","9225":"p_tank_bigsby","9508":"p_tyjae_spears","9506":"p_sean_tucker","9226":"p_devon_achane","9753":"p_zach_charbonnet","9757":"p_kendre_miller","10219":"p_chris_rodriguez","10235":"p_roschon_johnson","9511":"p_keaton_mitchell","9224":"p_chase_brown","10222":"p_jayden_reed","9488":"p_jaxon_smith_njigba","9756":"p_jordan_addison","9500":"p_josh_downs","9754":"p_quentin_johnston","9494":"p_marvin_mims","9997":"p_zay_flowers","10444":"p_cedric_tillman","9487":"p_parker_washington","9504":"p_kayshon_boutte","10229":"p_rashee_rice","9486":"p_dontayvion_wicks","10218":"p_xavier_hutchinson","9502":"p_tank_dell","10232":"p_michael_wilson","10226":"p_andrei_iosivas","9493":"p_puka_nacua","9482":"p_michael_mayer","10236":"p_dalton_kincaid","10859":"p_sam_laporta","9479":"p_darnell_washington","9484":"p_tucker_kraft","9480":"p_brenton_strange","10213":"p_tre_tucker","9501":"p_demario_douglas","11256":"p_tyson_bagent","11439":"p_jaleel_mclaughlin","11435":"p_emanuel_wilson","8160":"p_kenny_pickett","8161":"p_malik_willis","8183":"p_brock_purdy","8155":"p_breece_hall","8150":"p_kyren_williams","8151":"p_kenneth_walker","8132":"p_tyler_allgeier","8143":"p_jerome_ford","8138":"p_james_cook","8154":"p_brian_robinson","8136":"p_rachaad_white","8228":"p_jaylen_warren","8205":"p_isiah_pacheco","8112":"p_drake_london","8135":"p_treylon_burks","8146":"p_garrett_wilson","8144":"p_chris_olave","8119":"p_jahan_dotson","8148":"p_jameson_williams","8126":"p_wandale_robinson","8147":"p_john_metchie","8134":"p_khalil_shakir","8137":"p_george_pickens","8142":"p_alec_pierce","8125":"p_calvin_austin","8121":"p_romeo_doubs","8180":"p_jalen_nailor","8188":"p_tyquan_thornton","8117":"p_jalen_tolbert","8167":"p_christian_watson","8130":"p_trey_mcbride","8127":"p_charlie_kolar","8172":"p_greg_dulcich","8131":"p_isaiah_likely","8110":"p_jake_ferguson","8111":"p_cade_otton","8408":"p_jordan_mason","8698":"p_jake_tonges","8676":"p_rashid_shaheed","7523":"p_trevor_lawrence","7591":"p_justin_fields","7538":"p_zach_wilson","7610":"p_trey_lance","7527":"p_mac_jones","7585":"p_davis_mills","7543":"p_travis_etienne","7528":"p_najee_harris","7588":"p_javonte_williams","7611":"p_rhamondre_stevenson","7594":"p_chuba_hubbard","7564":"p_jamarr_chase","7525":"p_devonta_smith","7526":"p_jaylen_waddle","7547":"p_amon_ra_st_brown","7569":"p_nico_collins","7571":"p_rashod_bateman","7562":"p_tutu_atwell","7670":"p_joshua_palmer","7553":"p_kyle_pitts","7600":"p_pat_freiermuth","7828":"p_noah_gray","6770":"p_joe_burrow","6768":"p_tua_tagovailoa","6797":"p_justin_herbert","6804":"p_jordan_love","6904":"p_jalen_hurts","7083":"p_tyler_huntley","6790":"p_dandre_swift","6806":"p_jk_dobbins","6813":"p_jonathan_taylor","7021":"p_rico_dowdle","6786":"p_ceedee_lamb","6783":"p_jerry_jeudy","6801":"p_tee_higgins","6794":"p_justin_jefferson","6803":"p_brandon_aiyuk","6819":"p_michael_pittman","7049":"p_jauan_jennings","7002":"p_juwan_johnson","6826":"p_cole_kmet","6865":"p_colby_parkinson","7090":"p_darnell_mooney","6994":"p_lamar_jackson","7203":"p_antonio_williams","5849":"p_kyler_murray","5854":"p_drew_lock","5870":"p_daniel_jones","6011":"p_gardner_minshew","5892":"p_david_montgomery","5850":"p_josh_jacobs","6130":"p_devin_singletary","5967":"p_tony_pollard","5995":"p_justice_hill","5846":"p_dk_metcalf","5859":"p_aj_brown","5927":"p_terry_mclaurin","6149":"p_darius_slayton","5947":"p_jakobi_meyers","5872":"p_deebo_samuel","5857":"p_noah_fant","5844":"p_tj_hockenson","6111":"p_jake_browning","6271":"p_olamide_zaccheaus","4984":"p_josh_allen","4892":"p_baker_mayfield","4943":"p_sam_darnold","4881":"p_lamar_jackson","4972":"p_mason_rudolph","4866":"p_saquon_barkley","4981":"p_calvin_ridley","5045":"p_courtland_sutton","4950":"p_christian_kirk","4983":"p_dj_moore","5012":"p_mark_andrews","4993":"p_mike_gesicki","5022":"p_dallas_goedert","5001":"p_dalton_schultz","4017":"p_deshaun_watson","4046":"p_patrick_mahomes","4034":"p_christian_mccaffrey","4035":"p_alvin_kamara","4137":"p_james_conner","4037":"p_chris_godwin","4039":"p_cooper_kupp","4066":"p_evan_engram","4033":"p_david_njoku","4177":"p_mack_hollins","4217":"p_george_kittle","4199":"p_aaron_jones","4454":"p_kendrick_bourne","3161":"p_carson_wentz","3163":"p_jared_goff","3257":"p_jacoby_brissett","3294":"p_dak_prescott","3198":"p_derrick_henry","3214":"p_hunter_henry","3271":"p_tyler_higbee","3321":"p_tyreek_hill","2306":"p_jameis_winston","2307":"p_marcus_mariota","2449":"p_stefon_diggs","2216":"p_mike_evans","2133":"p_davante_adams","1837":"p_jimmy_garoppolo","1373":"p_geno_smith","1479":"p_keenan_allen","1466":"p_travis_kelce","1166":"p_kirk_cousins","829":"p_andy_dalton","638":"p_kyle_williams","421":"p_matthew_stafford","4961":"p_dj_moore","19":"p_joe_flacco","94":"p_kyle_williams","96":"p_aaron_rodgers"};
@@ -451,14 +509,15 @@ async function syncSleeper(){
  try{
   await refreshValues();
   const stt=await jget("/state/nfl").catch(()=>null);if(stt&&stt.week!=null)WEEK=+stt.week;
-  const u=await jget("/user/"+SLEEPER_USER),nR={},nS={},nP=[],nT={},nTR={},nTRP={},nSC={},suf={1:"1st",2:"2nd",3:"3rd",4:"4th"};
+  const u=await jget("/user/"+SLEEPER_USER),nR={},nS={},nP=[],nT={},nTR={},nTRP={},nSC={},nMU={},suf={1:"1st",2:"2nd",3:"3rd",4:"4th"};
   for(const lg of ["A","B"]){
    const id=LEAGUES[lg];
    const [li,ros,tp,us]=await Promise.all([jget("/league/"+id),jget("/league/"+id+"/rosters"),jget("/league/"+id+"/traded_picks"),jget("/league/"+id+"/users").catch(()=>[])]);
    const um={};us.forEach(x=>{um[x.user_id]=(x.metadata&&x.metadata.team_name)||x.display_name});nT[lg]={};ros.forEach(r=>{nT[lg][r.roster_id]=um[r.owner_id]||""});
    const st={};ros.forEach(r=>{const s=r.settings||{};st[r.roster_id]={w:s.wins||0,pf:(s.fpts||0)+(s.fpts_decimal||0)/100,pp:(s.ppts||0)+(s.ppts_decimal||0)/100,g:(s.wins||0)+(s.losses||0)+(s.ties||0)}});
    nS[lg]=st;
-   LGI[lg]={pws:(li.settings&&li.settings.playoff_week_start)||15,np:(li.settings&&li.settings.playoff_teams)||6};
+   LGI[lg]={pws:(li.settings&&li.settings.playoff_week_start)||15,np:(li.settings&&li.settings.playoff_teams)||6,sc:li.scoring_settings||null};
+   if(WEEK!=null){const cm=await jget("/league/"+id+"/matchups/"+WEEK).catch(()=>null);if(cm&&cm.length){const m={};cm.forEach(x=>{m[x.roster_id]={mid:x.matchup_id,pts:x.points||0,st:(x.starters||[]).map(s=>SIDMAP[s]||null)}});nMU[lg]={w:WEEK,m}}}
    const wk=Math.max(1,WEEK||1),txs=await Promise.all(Array.from({length:wk},(_,i)=>jget("/league/"+id+"/transactions/"+(i+1)).catch(()=>[])));
    nTRP[lg]=txs.flat().filter(t=>t.type==="trade"&&t.status!=="complete"&&t.status!=="failed").map(t=>({id:t.transaction_id,st:t.status,w:t.leg,r:t.roster_ids,a:t.adds||{},pk:t.draft_picks||[]}));
    nTR[lg]=txs.flat().filter(t=>t.type==="trade"&&t.status==="complete").map(t=>({w:t.leg,s:+li.season,r:t.roster_ids,a:t.adds||{},pk:t.draft_picks||[]}));
@@ -467,7 +526,8 @@ async function syncSleeper(){
    const mws=[];for(let w=Math.max(1,WEEK||1);w<LGI[lg].pws;w++)mws.push(w);
    const mss=await Promise.all(mws.map(w=>jget("/league/"+id+"/matchups/"+w).catch(()=>[])));
    nSC[lg]={};mws.forEach((w,i)=>{const m={};(mss[i]||[]).forEach(x=>{if(x.matchup_id!=null)m[x.roster_id]=x.matchup_id});if(Object.keys(m).length)nSC[lg][w]=m});
-   nR[lg]=ros.map(r=>({n:r.roster_id,rec:(r.settings.wins||0)+"-"+(r.settings.losses||0),me:0,u:r.owner_id===u.user_id?1:0,p:(r.players||[]).map(x=>SIDMAP[x]).filter(Boolean)}));
+   const sm=a=>(a||[]).map(x=>SIDMAP[x]).filter(Boolean);
+   nR[lg]=ros.map(r=>({n:r.roster_id,rec:(r.settings.wins||0)+"-"+(r.settings.losses||0),me:0,u:r.owner_id===u.user_id?1:0,p:sm(r.players),st:(r.starters||[]).map(x=>SIDMAP[x]||null),res:sm(r.reserve),tx:sm(r.taxi)}));
    const ord=orderFrom(st,(li.settings&&li.settings.playoff_teams)||6);
    if(WEEK!=null){HIST[lg]=HIST[lg]||{};HIST[lg]["w"+WEEK]={order:ord,pp:Object.fromEntries(Object.entries(st).map(([k,v])=>[k,v.pp])),t:Date.now()}}
    const QBL={};nR[lg].forEach(t=>{QBL[t.n]=qbOf(t.p)});
@@ -487,7 +547,7 @@ async function syncSleeper(){
      nP.push({id:pid,name:TAGS[lg]+" "+y2+" "+suf[r]+" ("+((nT[lg]&&nT[lg][o])||"Team "+o)+(QBL[o]?" · "+QBL[o]:"")+")",pos:"PICK",age:0,value:b.value,s:b.s,lg});
      const t=nR[lg].find(x=>x.n===own);if(t)t.p.push(pid)}}
   }
-  ROST=nR;STAND=nS;LPICKS=nP;TEAMS=nT;TRADES=nTR;PENDING=nTRP;LSCH=nSC;applyMe();saveHist();build();
+  ROST=nR;STAND=nS;LPICKS=nP;TEAMS=nT;TRADES=nTR;PENDING=nTRP;LSCH=nSC;MU=nMU;try{localStorage.setItem("dd2mu",JSON.stringify(MU))}catch(e){}applyMe();saveHist();build();applyShare();
   SYNCINFO="synced from Sleeper "+new Date().toLocaleString();
   try{localStorage.setItem("dd2sync",JSON.stringify({ROST,STAND,LPICKS,SYNCINFO,TEAMS,WEEK,TRADES,PENDING,LGI,LSCH}))}catch(e){}
   setStatus("ok");render();afterSync();drTick(true);
@@ -507,7 +567,7 @@ function sim(lg,meN,N=800){
   out.push({k,po:po/N,slot:sl/N,top3:t3/N})}
  return out}
 /* ===================== v6 UI LAYER ===================== */
-const UI={fa:"ALL",tab:"home",sub:{team:"lineup",trade:"ideas",draft:"order",league:"power"},sheet:null,pf:"ALL",pq:"",rpos:"ALL",fg:"ALL",ft:"ALL",vq:"",prev:"home",mu:{a:null,b:0},cmpHtml:""};
+const UI={fa:"ALL",tab:"home",sub:{team:"week",trade:"ideas",draft:"order",league:"power"},sheet:null,pf:"ALL",pq:"",rpos:"ALL",fg:"ALL",ft:"ALL",vq:"",prev:"home",mu:{a:null,b:0},cmpHtml:""};
 const svg=d=>`<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
 const IC={home:svg('<path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/>'),
  team:svg('<circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.5 2.7-6 6-6s6 2.5 6 6"/><path d="M16 5.5a3 3 0 010 5.5M18.5 14.5c1.6.8 2.5 2.6 2.5 5.5"/>'),
@@ -517,7 +577,7 @@ const IC={home:svg('<path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/>'),
  sync:svg('<path d="M20 11a8 8 0 00-14-4.5L4 9M4 5v4h4M4 13a8 8 0 0014 4.5l2-2.5M20 19v-4h-4"/>'),
  sliders:svg('<path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/>')};
 const NAV=[["home","Home"],["team","Team"],["trade","Trade"],["draft","Draft"],["league","League"]];
-const SUBS={team:[["lineup","Lineup"],["roster","Roster"],["outlook","Outlook"],["free","Free agents"]],trade:[["ideas","Ideas"],["build","Builder"]],draft:[["order","Order"],["picks","My picks"],["board","Board"],["rookies","2027 Board"]],league:[["power","Power"],["pos","Positions"],["trades","Trades"],["market","Market"]]};
+const SUBS={team:[["week","Week"],["lineup","Lineup"],["roster","Roster"],["outlook","Outlook"],["free","FA"]],trade:[["ideas","Ideas"],["build","Builder"]],draft:[["order","Order"],["picks","My picks"],["board","Board"],["rookies","2027 Board"]],league:[["power","Power"],["pos","Positions"],["trades","Trades"],["market","Market"]]};
 const fmt=n=>Math.round(n).toLocaleString();
 const tn=(lg,n)=>(TEAMS[lg]&&TEAMS[lg][n])||("Team "+n);
 const pctLab=x=>x>0&&x<.005?"<1%":x<1&&x>.995?">99%":Math.round(x*100)+"%";
@@ -660,7 +720,7 @@ function pHome(){const {L,R,me}=C();
  const out=`<div class="card"><h2>What to do now</h2>${mv.slice(0,5).join("")||'<p class="note">Nothing urgent. Your roster looks set.</p>'}</div>`;
  const since=SINCE?`<details class="card"><summary>Since your last visit</summary>${SINCE}</details>`:"";
  const rbc=`<div class="card"><h2>Rebuilding?</h2><p class="note">Rebuild mode turns this screen into a plan: who to sell, what to do with your picks, and when you can contend.</p><button class="btn sm" data-act="rbon">Switch to Rebuild mode</button></div>`;
- return stale+tiles+out+since+rbc}
+ return stale+weekCard(L,R,me)+tiles+out+since+rbc}
 
 /* ---------- Team ---------- */
 function pLineup(){const {L,R,me}=C();if(!me)return empty("Choose your team first.","Choose team","who");
@@ -719,7 +779,23 @@ function wiHtml(L,R,me,par,T){const r=whatIf(L.id,me,par,T.give,T.get),pc=x=>Mat
   const ys=[1,2,3].filter(y=>W0.rank[y]);
   h+=`<div class="scroll"><table><tr><th>Your power rank</th>${ys.map(y=>`<th>${SEAS()+y}</th>`).join("")}</tr><tr><td>No trade</td>${ys.map(y=>`<td>${W0.rank[y][me.n]}</td>`).join("")}</tr><tr><td>With trade</td>${ys.map(y=>`<td>${W1.rank[y][me.n]}</td>`).join("")}</tr></table></div><p class="note">Long-term rank uses the age curves and counts picks once they are drafted. Lower is better.</p>`}catch(e){}
  return h+'<p class="note">Strength comes from dynasty value, not weekly projections, and the same random games are used for both runs so the change is meaningful. Differences of 1–2 points are noise.</p>'}
-function pBuild(){const {L,R,me}=C(),T=S.trade;if(!me)return empty("Choose your team first.","Choose team","who");
+/* ===== v7.17: shareable trade links =====
+ #trade=<league>~<from roster>~<to roster>~<ids from gives>~<ids to gives> (ids joined with "."). Anyone in the league can open it:
+ the two teams in the trade get it loaded into the Builder from their own side; everyone else sees it graded for both teams. */
+function tradeLink(lg,f,t,g,r){return location.origin+location.pathname+"#trade="+[lg,f,t,g.join("."),r.join(".")].map(encodeURIComponent).join("~")}
+function readShare(){const m=/#trade=([^&]*)/.exec(location.hash||"");if(!m)return;const [lg,f,t,g,r]=m[1].split("~").map(x=>{try{return decodeURIComponent(x||"")}catch(e){return""}});
+ if(!LEAGUES[lg]||!(+f)||!(+t))return;UI.shared={lg,f:+f,t:+t,g:g?g.split("."):[],r:r?r.split("."):[]};S.trade.league=lg;UI.tab="trade";UI.sub.trade="build";
+ try{history.replaceState(null,"",location.pathname+location.search)}catch(e){}applyShare()}
+function applyShare(){const x=UI.shared;if(!x||x.done)return;const me=(ROST[x.lg]||[]).find(t=>t.me);if(!me)return;const T=S.trade,ok=id=>!!byId(id);
+ if(me.n===x.t){T.partner=x.f;T.give=x.r.filter(ok);T.get=x.g.filter(ok)}else if(me.n===x.f){T.partner=x.t;T.give=x.g.filter(ok);T.get=x.r.filter(ok)}else return;x.done=x.g.concat(x.r).every(ok)?1:0;save()}
+function sharedCard(L){const x=UI.shared;if(!x||x.lg!==L.id)return"";const R=ROST[L.id]||[],F=R.find(t=>t.n===x.f),To=R.find(t=>t.n===x.t),me=R.find(t=>t.me);
+ if(!F||!To)return`<div class="card"><p class="note">This shared trade names a team that is not in ${esc(L.name)}. Sync and open the link again.</p><button class="btn sm ghost" data-act="shx">Dismiss</button></div>`;
+ const ok=id=>!!byId(id),g=x.g.filter(ok),r=x.r.filter(ok),miss=x.g.length+x.r.length-g.length-r.length,a=score(g,L),b=score(r,L),d=(a-b)/Math.max(a,b,1);
+ const V=new Map();S.players.forEach(p=>V.set(p.id,{p,v:adj(p,L)}));const ls=mkLsum(V,SLOTS[L.id]),chg=(t,out,inn)=>Math.round(ls(t.p.filter(i=>!out.includes(i)).concat(inn))-ls(t.p));
+ const side=(t,gets,gr,lc)=>`<div style="margin:8px 0"><span style="font-weight:800;font-size:22px;min-width:40px;display:inline-block">${gr}</span><b>${esc(tn(L.id,t.n))}${me&&me.n===t.n?" (you)":""}</b> gets ${esc(gets.map(pname).join(", ")||"nothing")}<br><small class="note">${fmt(score(gets,L))} value · starting lineup ${lc>=0?"+":""}${lc}</small></div>`;
+ const party=me&&(me.n===x.f||me.n===x.t);
+ return`<div class="card"><h2>Shared trade</h2>${side(To,g,gradeLetter(d),chg(To,r,g))}${side(F,r,gradeLetter(-d),chg(F,g,r))}${miss?`<p class="note">${miss} piece${miss>1?"s are":" is"} not in this device's data yet; sync and open the link again.</p>`:""}<p class="note">${party?"Loaded into the Builder below from your side.":me?"You are not in this trade, so your Builder is unchanged.":"Choose your team to load it from your side."} Graded at your device's values for ${esc(L.name)}; B means about even.</p><div class="acts"><button class="btn sm ghost" data-act="shx">Dismiss</button></div></div>`}
+function pBuild(){const {L,R,me}=C(),T=S.trade;if(!me)return sharedCard(L)+empty("Choose your team first.","Choose team","who");
  if(!R.find(t=>t.n===T.partner)||T.partner===me.n)T.partner=(R.find(t=>!t.me)||{}).n;
  const par=R.find(t=>t.n===T.partner),has=T.give.length||T.get.length;
  const g=score(T.give,L),r=score(T.get,L),diff=(r-g)/Math.max(g,r,1),tot=g+r||1;
@@ -737,11 +813,11 @@ function pBuild(){const {L,R,me}=C(),T=S.trade;if(!me)return empty("Choose your 
    bal=`<p class="note" style="margin:10px 0 4px">To even it, ${win?"you could add":"ask them to add"}:</p><div class="chips">${c.map(x=>`<button class="pill" data-act="addq" data-k="${key}" data-id="${x.i}">${esc(pname(x.i))} <small>${val(x.i)}</small></button>`).join("")}</div>`}}
  PITCH=makePitch(L,T,par,lb,diff,pname);
  const panel=(key,title)=>`<div class="card"><div class="ph"><h2 style="margin:0">${title}</h2><button class="btn sm ghost" data-act="add" data-k="${key}">+ Add</button></div>${T[key].map(id=>`<div class="li"><div class="nm">${esc(pname(id))}${ibx(id)}${tarr(id)}<br><small>${pinfo(byId(id))}</small></div><div class="acts"><span class="val">${val(id)}</span><button class="mini" data-act="rm" data-k="${key}" data-id="${id}" aria-label="Remove">✕</button></div></div>`).join("")||'<p class="note">Nothing yet. Tap + Add.</p>'}</div>`;
- return`<div class="card"><label>Trading with</label><select data-chg="partner">${R.filter(t=>!t.me).map(t=>`<option value="${t.n}" ${t.n===T.partner?"selected":""}>${esc(tn(L.id,t.n)+(qb1(L.id,t.n)?" · "+qb1(L.id,t.n):"")+" ("+t.rec+")")}</option>`).join("")}</select></div>
+ return sharedCard(L)+`<div class="card"><label>Trading with</label><select data-chg="partner">${R.filter(t=>!t.me).map(t=>`<option value="${t.n}" ${t.n===T.partner?"selected":""}>${esc(tn(L.id,t.n)+(qb1(L.id,t.n)?" · "+qb1(L.id,t.n):"")+" ("+t.rec+")")}</option>`).join("")}</select></div>
  <div class="card"><div class="vd ${cl}">${v}</div><div class="bar"><i class="a" style="width:${g/tot*100}%"></i><i class="b" style="width:${r/tot*100}%"></i></div><div class="split"><span>You give <b>${fmt(g)}</b></span><span>You get <b>${fmt(r)}</b></span></div>${imp}${bal}</div>
  ${panel("give","You give")}${panel("get","You get")}
  ${has?`<div class="card"><h2>Simulate my season</h2><p class="note">Plays out your remaining schedule 2,000 times with and without this trade, using byes and injuries.</p><p><button class="btn" data-act="wsim">Run simulation</button></p>${UI.wi&&UI.wi.key===wiKey()?UI.wi.html:""}</div>`:""}
- <div class="acts" style="justify-content:center;gap:10px"><button class="btn" data-act="pitch">Copy pitch</button><button class="btn ghost" data-act="clear">Clear</button></div>`}
+ <div class="acts" style="justify-content:center;gap:10px"><button class="btn" data-act="pitch">Copy pitch</button>${has&&par?`<button class="btn ghost" data-act="share">Share link</button>`:""}<button class="btn ghost" data-act="clear">Clear</button></div>`}
 
 /* ---------- Draft ---------- */
 function pOrder(){const {L,R,me}=C(),st=STAND[L.id];if(!st)return empty("No standings loaded yet.");
@@ -937,7 +1013,7 @@ function pMore(){const {L,R}=C(),w=(S.watch||[]).map(byId).filter(Boolean);
  <details class="card"><summary>Data and status</summary><p class="note">Rosters: ${esc(SYNCINFO)}<br>Values: ${esc(VALINFO)}</p><p><button class="btn sm" data-act="sync">Sync with Sleeper</button> <button class="btn sm ghost" data-act="refvals">Refresh values</button></p><p><button class="btn sm ghost" data-act="reset">Reset saved data on this device</button></p></details>`}
 
 /* ---------- render + events ---------- */
-const PAGES={"team.lineup":pLineup,"team.roster":pRoster,"team.outlook":pOutlook,"league.market":pMarket,"team.free":pFree,"trade.ideas":pIdeas,"trade.build":pBuild,"draft.order":pOrder,"draft.picks":pPicks,"draft.board":pBoard,"draft.rookies":()=>"","league.power":pPower,"league.pos":pPos,"league.trades":pTrades};
+const PAGES={"team.week":pWeek,"team.lineup":pLineup,"team.roster":pRoster,"team.outlook":pOutlook,"league.market":pMarket,"team.free":pFree,"trade.ideas":pIdeas,"trade.build":pBuild,"draft.order":pOrder,"draft.picks":pPicks,"draft.board":pBoard,"draft.rookies":()=>"","league.power":pPower,"league.pos":pPos,"league.trades":pTrades};
 function render(){
  try{hdr();navr();renderSheet()}catch(e){console.error(e)}
  let h;try{h=UI.tab==="more"?pMore():UI.tab==="home"&&!rbOn()?pHome():segr()+PAGES[UI.tab+"."+UI.sub[UI.tab]]()}catch(e){console.error(e);h=`<div class="card"><p class="note">Something went wrong on this page (${esc(e.message)}). Try Sync, or reset in More.</p></div>`}
@@ -954,8 +1030,8 @@ function doAct(a,d){const {L,R,me}=C(),T=S.trade;
  case"back":UI.tab=UI.prev||"home";return render();
  case"who":UI.sheet={t:"who"};return render();
  case"close":UI.sheet=null;return render();
- case"setmeall":S.viewAs=S.viewAs||{};S.leagues.forEach(l=>{const t=(ROST[l.id]||[]).find(x=>x.u);if(t)S.viewAs[l.id]=t.n});S.viewAsSet=true;save();applyMe();UI.sheet=null;render();try{rbSend()}catch(e){}return;
- case"setme":S.viewAs=S.viewAs||{};S.viewAs[d.lg]=+d.n;S.viewAsSet=true;save();applyMe();render();try{rbSend()}catch(e){}return;
+ case"setmeall":S.viewAs=S.viewAs||{};S.leagues.forEach(l=>{const t=(ROST[l.id]||[]).find(x=>x.u);if(t)S.viewAs[l.id]=t.n});S.viewAsSet=true;save();applyMe();applyShare();UI.sheet=null;render();try{rbSend()}catch(e){}return;
+ case"setme":S.viewAs=S.viewAs||{};S.viewAs[d.lg]=+d.n;S.viewAsSet=true;save();applyMe();applyShare();render();try{rbSend()}catch(e){}return;
  case"core":{S.core=S.core||{};const l=S.core[L.id]=S.core[L.id]||[],i=l.indexOf(d.id);if(i>=0)l.splice(i,1);else l.push(d.id);save();VER++;return render()}
  case"rbdone":{S.rbDone=S.rbDone||{};const k=L.id+"|"+d.k;if(S.rbDone[k])delete S.rbDone[k];else S.rbDone[k]=1;save();return render()}
  case"dtol":S.dtol=d.v;save();return render();
@@ -975,6 +1051,9 @@ function doAct(a,d){const {L,R,me}=C(),T=S.trade;
  case"rm":T[d.k]=T[d.k].filter(x=>x!==d.id);save();return render();
  case"clear":T.give=[];T.get=[];save();return render();
  case"pitch":return copyText(PITCH||"Add players to both sides first.");
+ case"share":{if(!me||!T.partner)return;const u=tradeLink(L.id,me.n,T.partner,T.give,T.get),txt=(PITCH?PITCH+"\n\n":"")+"Open it in Dynasty Desk: ";
+  if(navigator.share){navigator.share({title:"Trade idea",text:txt,url:u}).catch(()=>{})}else copyText(txt+u);return}
+ case"shx":UI.shared=null;return render();
  case"recap":return copyText(RECAP);
  case"fa":UI.fa=d.v;UI.faN=15;return render();
  case"famore":UI.faN=(UI.faN||15)+25;return render();
@@ -1187,6 +1266,7 @@ function draftPlan(L,R,me){const tolK=S.dtol||"bal";return memo("dpl|"+L.id+"|"+
 try{const c=JSON.parse(localStorage.getItem("dd2sync"));if(c&&c.ROST){ROST=c.ROST;STAND=c.STAND;LPICKS=c.LPICKS;TEAMS=c.TEAMS||{};TRADES=c.TRADES||{};PENDING=c.PENDING||{};LGI=c.LGI||{};LSCH=c.LSCH||{};if(c.WEEK!=null)WEEK=c.WEEK;SYNCINFO=c.SYNCINFO+" (saved)";build()}}catch(e){}
 loadVals();applyBD();loadVHist();applyMe();try{if(!S.core){const m=(ROST.A||[]).find(t=>t.me);if(m&&m.p.includes("p_jaxon_smith_njigba")&&m.p.includes("pk_A_1_"+m.n)){S.core={A:["p_jaxon_smith_njigba","pk_A_1_"+m.n]};save()}}}catch(e){}
 UI.sheet=S.viewAsSet?null:{t:"who"};
+readShare();window.addEventListener("hashchange",()=>{readShare();render()});
 render();syncSleeper();
 
 /* ===== 2027 rookie board (embedded) with live team feed ===== */
