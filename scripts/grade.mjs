@@ -188,7 +188,11 @@ const race={};for(const lg in ROSW){const wks=Object.keys(ROSW[lg]).map(Number).
  const tl=(tradeLog[lg]||[]).filter(t=>t.y===SEASON).sort((a,b)=>a.t-b.t);let ti=0;
  for(const w of wks){const d=new Date(Date.now()-7*864e5*Math.max(0,CUR-w)).toISOString().slice(0,10);dates.push(d);
   while(ti<tl.length&&tl[ti].w<=w){(tl[ti].pk||[]).forEach(p=>{const k=p.season+"|"+p.round+"|"+p.roster_id;if(k in own)own[k]=p.owner_id});ti++}
-  const pv={};for(const k in own){const [y,r]=k.split("|"),v=valAt(pkey(y+" "+sfx[r]),d);if(v)pv[own[k]]=(pv[own[k]]||0)+v}
+  // next year's picks priced by the original team's standing that week (bottom third early, middle mid, top third late)
+  const se=(H2H[lg].seasons||[]).find(x=>x.y===SEASON),rec={};rids.forEach(o=>rec[o]={w:0,pf:0});
+  if(se)for(const ww in se.weeks){if(+ww>w)continue;(se.weeks[ww]||[]).forEach(([a,pa,b,pb])=>{if(rec[a]){rec[a].pf+=pa;if(pa>pb)rec[a].w++}if(rec[b]){rec[b].pf+=pb;if(pb>pa)rec[b].w++}})}
+  const ordr=rids.slice().sort((a,b)=>rec[a].w-rec[b].w||rec[a].pf-rec[b].pf),tier=o=>{const i=ordr.indexOf(o),n=ordr.length;return i<n/3?"early":i<2*n/3?"mid":"late"};
+  const pv={};for(const k in own){const [y,r,o]=k.split("|");const v=(+y===SEASON+1?valAt(pkey(y+" "+sfx[r]+" "+tier(+o)),d):null)??valAt(pkey(y+" "+sfx[r]),d);if(v)pv[own[k]]=(pv[own[k]]||0)+v}
   for(const rid in ROSW[lg][w]){let t=0;for(const sid of ROSW[lg][w][rid]){const v=valAt(pkey(NAME[sid]||""),d);if(v)t+=v}
    (teams[rid]=teams[rid]||[]).push(Math.round(t+(pv[rid]||0)));(picks[rid]=picks[rid]||[]).push(Math.round(pv[rid]||0))}}
  race[lg]={weeks:wks,dates,teams,picks}}
