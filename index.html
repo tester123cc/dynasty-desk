@@ -988,7 +988,7 @@ function recapCard(L){const X=weekRecap(L);if(!X)return"";RECAPW=`${L.name} · w
  return`<div class="card"><h2>Week ${X.w} recap</h2>${X.lines.map(l=>`<p class="note" style="margin:4px 0;color:var(--ink)">${esc(l)}</p>`).join("")}<div class="acts" style="margin-top:8px"><button class="btn sm" data-act="recapw">Share recap</button></div></div>`}
 let RECAPW="";
 /* League value race (v7.18): each team's total expert value week by week, from data/value-race.json (built nightly by grade.mjs
- from each week's Sleeper rosters priced at that date's DynastyProcess values; players only). One line per team: the highlighted
+ from each week's Sleeper rosters plus the picks owned that week, priced at that date's DynastyProcess values). One line per team: the highlighted
  team in the accent color with a label, everyone else in gray; pick a team to highlight. */
 let RACE=null;
 function raceCard(L,me){const D=RACE&&RACE.race&&RACE.race[L.id];if(!D||!D.weeks||D.weeks.length<2)return"";
@@ -1004,7 +1004,7 @@ function raceCard(L,me){const D=RACE&&RACE.race&&RACE.race[L.id];if(!D||!D.weeks
  const ch=ids.map(t=>({t,pc:D.teams[t][n-1]/Math.max(1,D.teams[t][0])-1})).sort((a,b)=>b.pc-a.pc),r0=rkOf(hl,0),r1=rkOf(hl,n-1);
  const mv=x=>`${esc(tn(L.id,x.t))} ${x.pc>=0?"+":""}${Math.round(x.pc*100)}%`;
  return`<div class="card"><h2>Value race</h2><div class="fsel"><label>Highlight<select data-chg="raceT">${ids.map(t=>`<option value="${t}" ${t===hl?"selected":""}>${esc(tn(L.id,t))}${me&&me.n===t?" (you)":""}</option>`).join("")}</select></label></div>${svgc}
- <p style="margin:6px 0 0"><b>${esc(tn(L.id,hl))}</b>: #${r0} in week ${W[0]} → #${r1} now (${fmt(hv[0])} → ${fmt(hv[n-1])}).</p><p class="note" style="margin:4px 0 0">Rising most: ${ch.slice(0,3).map(mv).join(", ")}. Falling most: ${ch.slice(-3).reverse().map(mv).join(", ")}.</p>${info("<p>Each team's total expert value (DynastyProcess) for the roster it had that week, priced at that week's values. Picks are left out because Sleeper's weekly rosters do not include them. Updated nightly. Tap a dot for the week's value and rank.</p>")}</div>`}
+ <p style="margin:6px 0 0"><b>${esc(tn(L.id,hl))}</b>: #${r0} in week ${W[0]} → #${r1} now (${fmt(hv[0])} → ${fmt(hv[n-1])}).</p><p class="note" style="margin:4px 0 0">Rising most: ${ch.slice(0,3).map(mv).join(", ")}. Falling most: ${ch.slice(-3).reverse().map(mv).join(", ")}.</p>${info("<p>Each team's total expert value (DynastyProcess) for the roster it had that week plus the draft picks it owned that week (next two drafts, rounds 1 to 4, replayed from the league's trades), priced at that week's values. Updated nightly. Tap a dot for the week's value and rank.</p>")}</div>`}
 /* ---------- Draft ---------- */
 function pOrder(){const {L,R,me}=C(),st=STAND[L.id];if(!st)return empty("No standings loaded yet.");
  const np=6,ord=orderFrom(st,np),hl=HIST[L.id]||{};

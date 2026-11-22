@@ -181,11 +181,17 @@ const G={t:Date.now(),season:SEASON,week:CUR,liveFrom:liveWeeks.length?Math.min(
  weeks:wk.map(x=>({lg:x.lg,y:x.y,w:x.w,bt:x.bt,n:x.games.length,brier:x.brier,acc:x.acc,calls:x.calls,pos:x.pos,games:x.games.map(g=>({a:g.a,b:g.b,p:g.p,sa:g.sa,sb:g.sb,out:g.out}))})),
  alerts};
 fs.mkdirSync("data",{recursive:true});
-// league value race: each team's roster that week, priced at the expert values of that date (players only; picks are not in matchup rosters)
-const race={};for(const lg in ROSW){const wks=Object.keys(ROSW[lg]).map(Number).sort((a,b)=>a-b),teams={},dates=[];
+// league value race: each team's roster that week plus the draft picks it owned that week (next two drafts, rounds 1-4,
+// ownership replayed from this season's trades), priced at the expert values of that date
+const race={};for(const lg in ROSW){const wks=Object.keys(ROSW[lg]).map(Number).sort((a,b)=>a-b),teams={},picks={},dates=[];
+ const rids=Object.keys(ROSW[lg][wks[0]]).map(Number),own={};for(const y of [SEASON+1,SEASON+2])for(let r=1;r<=4;r++)for(const o of rids)own[y+"|"+r+"|"+o]=o;
+ const tl=(tradeLog[lg]||[]).filter(t=>t.y===SEASON).sort((a,b)=>a.t-b.t);let ti=0;
  for(const w of wks){const d=new Date(Date.now()-7*864e5*Math.max(0,CUR-w)).toISOString().slice(0,10);dates.push(d);
-  for(const rid in ROSW[lg][w]){let t=0;for(const sid of ROSW[lg][w][rid]){const v=valAt(pkey(NAME[sid]||""),d);if(v)t+=v}(teams[rid]=teams[rid]||[]).push(Math.round(t))}}
- race[lg]={weeks:wks,dates,teams}}
-wr("data/value-race.json",{t:Date.now(),src:"expert values (DynastyProcess) on each week's rosters; picks not included",race});
+  while(ti<tl.length&&tl[ti].w<=w){(tl[ti].pk||[]).forEach(p=>{const k=p.season+"|"+p.round+"|"+p.roster_id;if(k in own)own[k]=p.owner_id});ti++}
+  const pv={};for(const k in own){const [y,r]=k.split("|"),v=valAt(pkey(y+" "+sfx[r]),d);if(v)pv[own[k]]=(pv[own[k]]||0)+v}
+  for(const rid in ROSW[lg][w]){let t=0;for(const sid of ROSW[lg][w][rid]){const v=valAt(pkey(NAME[sid]||""),d);if(v)t+=v}
+   (teams[rid]=teams[rid]||[]).push(Math.round(t+(pv[rid]||0)));(picks[rid]=picks[rid]||[]).push(Math.round(pv[rid]||0))}}
+ race[lg]={weeks:wks,dates,teams,picks}}
+wr("data/value-race.json",{t:Date.now(),src:"expert values (DynastyProcess) on each week's rosters plus the picks each team owned that week",race});
 wr("data/predictions.json",PRED);wr("data/grades.json",G);wr("data/model.json",MODEL);wr("data/h2h.json",H2H);
 pr("graded",gAll.length,"games",ssAll.length,"calls",trades.length,"trades","model",JSON.stringify({sdK,bias}),"alerts",alerts.length);
