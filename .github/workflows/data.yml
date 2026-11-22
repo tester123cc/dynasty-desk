@@ -14,6 +14,12 @@ jobs:
         with:
           node-version: 20
       - run: node scripts/fetch-data.mjs
+      - name: Record the site's trade ideas
+        run: |
+          npm i --no-save --no-package-lock playwright-core@1.49.1
+          node scripts/record-ideas.mjs
+        continue-on-error: true
+        timeout-minutes: 15
       - name: Grade predictions and retrain
         run: node scripts/grade.mjs
         continue-on-error: true

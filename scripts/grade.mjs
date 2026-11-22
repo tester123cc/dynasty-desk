@@ -64,7 +64,7 @@ const PC={};async function projFor(y,w){const k=y+"|"+w;if(PC[k])return PC[k];
 
 const PRED=rd("data/predictions.json",{v:1,weeks:{}});
 const MODEL0=Object.assign({},PRIOR,rd("data/model.json",{}));
-const H2H={};const results={};// results[lg][y][w] = matchups (final)
+const H2H={};const results={};const ROSW={};// ROSW[lg][week][roster] = that week's roster (Sleeper ids)// results[lg][y][w] = matchups (final)
 const tradeLog={};
 
 for(const lg of ["A","B"]){
@@ -73,6 +73,7 @@ for(const lg of ["A","B"]){
  while(id&&id!=="0"&&hops<5){const li=await api("/league/"+id);if(!li)break;const y=+li.season,sc=li.scoring_settings||null,pws=(li.settings&&li.settings.playoff_week_start)||15;
   const last=y===SEASON?Math.min(CUR,17):17,weeks={};results[lg][y]={};
   for(let w=1;w<=last;w++){const ms=await api("/league/"+id+"/matchups/"+w).catch(()=>null);if(!ms||!ms.length)continue;
+   if(y===SEASON){(ROSW[lg]=ROSW[lg]||{})[w]=Object.fromEntries(ms.map(e=>[e.roster_id,e.players||[]]))}
    const done=y<SEASON||w<CUR,started=ms.some(e=>(e.points||0)>0);
    if(done&&started){results[lg][y][w]=ms;const g={};ms.forEach(e=>{if(e.matchup_id!=null)(g[e.matchup_id]=g[e.matchup_id]||[]).push(e)});
     weeks[w]=Object.values(g).filter(x=>x.length===2).map(([a,b])=>[a.roster_id,r1(a.points||0),b.roster_id,r1(b.points||0)]);weeks[w].po=w>=pws?1:0}
@@ -134,6 +135,29 @@ const trades=[];for(const lg of ["A","B"])for(const t of tradeLog[lg]){const d=n
  trades.push({lg,y:t.y,w:t.w,d,age,a,b,ga:A.got,gb:B.got,grade:gradeLetter(d0),d0:r3(d0),d1:r3(d1),fav,now,ptsA:r1(A.pts),ptsB:r1(B.pts),unk:A.unk+B.unk,mature:age>=28,held:fav==null?null:fav===now?1:now==null?.5:0})}
 const mt=trades.filter(t=>t.mature&&t.held!=null);
 
+// ---------- the site's own trade ideas and buy-low / sell-high calls (data/idea-log.json from record-ideas.mjs) ----------
+// After 28 days: an offer paid off if what you would have received gained value relative to what you would have sent (expert values),
+// a buy-low call if the market moved up relative to the experts (the gap closed), a sell-high call if it moved down.
+const mAt=(lg,k,d)=>{let v=null;for(const r of H){if(r.d>d)break;if(r.m&&r.m[lg]&&r.m[lg][k]!=null)v=r.m[lg][k]}return v};
+const mNow=(lg,k)=>{for(let i=H.length-1;i>=0;i--){const r=H[i];if(r.m&&r.m[lg]&&r.m[lg][k]!=null)return r.m[lg][k]}return null};
+const PTS={};for(const lg in results)for(const y in results[lg])for(const w in results[lg][y])results[lg][y][w].forEach(e=>{const P=e.players_points||{};for(const sid in P)((PTS[lg]=PTS[lg]||{})[sid]=PTS[lg][sid]||{})[y*100+ +w]=P[sid]});
+const wkOf=d=>CUR-Math.round((Date.now()-Date.parse(d))/(7*864e5));
+const ILOG=rd("data/idea-log.json",{rows:[]}).rows,ideas=[];
+for(const r of ILOG){const age=Math.round((Date.now()-Date.parse(r.d))/864e5);if(age<28)continue;
+ const sum=(xs,f)=>{let t=0,miss=0;for(const x of xs){const v=x.k?f(x.k):null;if(v==null)miss++;else t+=v}return{t,miss}};
+ const pts=xs=>{let t=0;const w0=SEASON*100+wkOf(r.d);for(const x of xs){const P=x.s&&PTS[r.lg]&&PTS[r.lg][x.s];if(P)for(const k in P)if(+k>w0)t+=P[k]}return r1(t)};
+ if(r.kind==="offer"){const g0=sum(r.give,k=>valAt(k,r.d)),g1=sum(r.give,valNow),t0=sum(r.get,k=>valAt(k,r.d)),t1=sum(r.get,valNow);
+  if(g0.miss+t0.miss>(r.give.length+r.get.length)/2||!g0.t||!t0.t)continue;
+  const rel=t1.t/t0.t-g1.t/g0.t;ideas.push({...r,age,rel:r3(rel),hit:Math.abs(rel)<.02?.5:rel>0?1:0,ptsGet:pts(r.get),ptsGive:pts(r.give)})}
+ else{const x=(r.get[0]||r.give[0]);if(!x||!x.k)continue;const m0=mAt(r.lg,x.k,r.d),m1=mNow(r.lg,x.k),e0=valAt(x.k,r.d),e1=valNow(x.k);if(!m0||!m1||!e0||!e1)continue;
+  const rel=m1/m0-e1/e0,sgn=r.kind==="buylow"?1:-1;ideas.push({...r,age,rel:r3(rel),hit:Math.abs(rel)<.02?.5:sgn*rel>0?1:0})}}
+const isum=a=>({n:a.length,hit:a.length?r3(avg(a.map(x=>x.hit))):null,rel:a.length?r3(avg(a.map(x=>x.rel))):null});
+const offs=ideas.filter(x=>x.kind==="offer"),grp=(a,f)=>{const o={};a.forEach(x=>{(o[f(x)]=o[f(x)]||[]).push(x)});return Object.fromEntries(Object.entries(o).map(([k,v])=>[k,isum(v)]))};
+// learning: each engine and label's record, shrunk toward even with 20 ideas of pseudo-data; the app nudges its ranking by it
+const byEL=grp(offs,x=>x.eng+"|"+x.lab),adjI=Object.fromEntries(Object.entries(byEL).map(([k,v])=>[k,r3((v.hit-.5)*v.n/(v.n+20))]));
+const IDEAS={logged:ILOG.length,pending:ILOG.length-ideas.length,offers:isum(offs),byEng:grp(offs,x=>x.eng),byLab:grp(offs,x=>x.lab),buylow:isum(ideas.filter(x=>x.kind==="buylow")),sellhigh:isum(ideas.filter(x=>x.kind==="sellhigh")),adj:adjI,
+ recent:ideas.sort((a,b)=>b.d<a.d?-1:1).slice(0,40).map(x=>({d:x.d,lg:x.lg,team:x.team,kind:x.kind,eng:x.eng,lab:x.lab,partner:x.partner,give:(x.give||[]).map(g=>g.n),get:(x.get||[]).map(g=>g.n),rel:x.rel,hit:x.hit,ptsGet:x.ptsGet,ptsGive:x.ptsGive}))};
+
 // ---------- alerts: when the owner should come in and have the model looked at ----------
 const alerts=[];const live=wk.filter(x=>!x.bt&&x.games.length),lw=[...new Set(live.map(x=>x.y*100+x.w))].sort((a,b)=>a-b).slice(-3);
 const lastLive=lw.map(k=>live.filter(x=>x.y*100+x.w===k));
@@ -143,6 +167,8 @@ const fav=gAll.filter(g=>Math.max(g.p,1-g.p)>=.7);if(fav.length>=15){const fw=av
 const ssLive=lw.flatMap(k=>ssAll.filter(c=>!c.bt&&c.y*100+c.w===k));if(lw.length===3&&ssLive.length>=8&&avg(ssLive.map(c=>c.hit))<.45)alerts.push({lvl:"alert",area:"Start/sit",msg:`Start/sit calls were right only ${Math.round(avg(ssLive.map(c=>c.hit))*100)}% of the time over the last three weeks (${ssLive.length} calls).`,fix:"Ask Claude to check the start/sit logic and the projection source."});
 for(const ps in biasRaw){const n=projAll[ps].length;if(n>=60&&biasRaw[ps]!=null&&(biasRaw[ps]<.8||biasRaw[ps]>1.2))alerts.push({lvl:"alert",area:"Projections",msg:`${ps} projections are off by ${Math.round(Math.abs(biasRaw[ps]-1)*100)}% (${biasRaw[ps]<1?"too high":"too low"}), beyond what the automatic correction is allowed to fix.`,fix:"Ask Claude to check how projections are scored for this league."})}
 if(mt.length>=6&&avg(mt.map(t=>t.held))<.4)alerts.push({lvl:"alert",area:"Trade grades",msg:`Only ${Math.round(avg(mt.map(t=>t.held))*100)}% of graded trades still favor the side the site picked a month later (${mt.length} trades).`,fix:"Ask Claude to review the value blend and trade grading."});
+if(IDEAS.offers.n>=20&&IDEAS.offers.hit<.4)alerts.push({lvl:"alert",area:"Trade ideas",msg:`Only ${Math.round(IDEAS.offers.hit*100)}% of the site's trade ideas paid off a month later (${IDEAS.offers.n} ideas).`,fix:"Ask Claude to review the trade suggestion engine."});
+{const bs=[...ideas.filter(x=>x.kind!=="offer")];if(bs.length>=20&&avg(bs.map(x=>x.hit))<.4)alerts.push({lvl:"alert",area:"Buy low / sell high",msg:`Only ${Math.round(avg(bs.map(x=>x.hit))*100)}% of buy-low and sell-high calls went the right way (${bs.length} calls).`,fix:"Ask Claude to review the buy/sell finder thresholds."})}
 for(const ps in biasRaw){const n=projAll[ps].length;if(n>=60&&biasRaw[ps]!=null&&Math.abs(biasRaw[ps]-1)>=.1&&biasRaw[ps]>=.8&&biasRaw[ps]<=1.2)alerts.push({lvl:"watch",area:"Projections",msg:`${ps} projections run ${Math.round(Math.abs(biasRaw[ps]-1)*100)}% ${biasRaw[ps]<1?"high":"low"}; the site now corrects for it.`,fix:""})}
 
 const liveWeeks=Object.values(PRED.weeks).filter(p=>!p.bt&&p.y===SEASON).map(p=>p.w);
@@ -150,9 +176,26 @@ const G={t:Date.now(),season:SEASON,week:CUR,liveFrom:liveWeeks.length?Math.min(
  win:{all:winSum(gAll),live:winSum(gAll.filter(g=>!g.bt)),bt:winSum(gAll.filter(g=>g.bt))},
  ss:{all:ssSum(ssAll),live:ssSum(ssAll.filter(c=>!c.bt))},
  proj:Object.fromEntries(Object.entries(projAll).map(([k,a])=>[k,{n:a.length,ratio:biasRaw[k],mae:a.length?r1(avg(a.map(x=>Math.abs(x[1]-x[0])))):null}])),
+ ideas:IDEAS,
  trades:{n:trades.length,mature:mt.length,held:mt.length?r3(avg(mt.map(t=>t.held))):null,list:trades.sort((a,b)=>b.d<a.d?-1:1).slice(0,60)},
  weeks:wk.map(x=>({lg:x.lg,y:x.y,w:x.w,bt:x.bt,n:x.games.length,brier:x.brier,acc:x.acc,calls:x.calls,pos:x.pos,games:x.games.map(g=>({a:g.a,b:g.b,p:g.p,sa:g.sa,sb:g.sb,out:g.out}))})),
  alerts};
 fs.mkdirSync("data",{recursive:true});
+// league value race: each team's roster that week plus the draft picks it owned that week (next two drafts, rounds 1-4,
+// ownership replayed from this season's trades), priced at the expert values of that date
+const race={};for(const lg in ROSW){const wks=Object.keys(ROSW[lg]).map(Number).sort((a,b)=>a-b),teams={},picks={},dates=[];
+ const rids=Object.keys(ROSW[lg][wks[0]]).map(Number),own={};for(const y of [SEASON+1,SEASON+2])for(let r=1;r<=4;r++)for(const o of rids)own[y+"|"+r+"|"+o]=o;
+ const tl=(tradeLog[lg]||[]).filter(t=>t.y===SEASON).sort((a,b)=>a.t-b.t);let ti=0;
+ for(const w of wks){const d=new Date(Date.now()-7*864e5*Math.max(0,CUR-w)).toISOString().slice(0,10);dates.push(d);
+  while(ti<tl.length&&tl[ti].w<=w){(tl[ti].pk||[]).forEach(p=>{const k=p.season+"|"+p.round+"|"+p.roster_id;if(k in own)own[k]=p.owner_id});ti++}
+  // next year's picks priced by the original team's standing that week (bottom third early, middle mid, top third late)
+  const se=(H2H[lg].seasons||[]).find(x=>x.y===SEASON),rec={};rids.forEach(o=>rec[o]={w:0,pf:0});
+  if(se)for(const ww in se.weeks){if(+ww>w)continue;(se.weeks[ww]||[]).forEach(([a,pa,b,pb])=>{if(rec[a]){rec[a].pf+=pa;if(pa>pb)rec[a].w++}if(rec[b]){rec[b].pf+=pb;if(pb>pa)rec[b].w++}})}
+  const ordr=rids.slice().sort((a,b)=>rec[a].w-rec[b].w||rec[a].pf-rec[b].pf),tier=o=>{const i=ordr.indexOf(o),n=ordr.length;return i<n/3?"early":i<2*n/3?"mid":"late"};
+  const pv={};for(const k in own){const [y,r,o]=k.split("|");const v=(+y===SEASON+1?valAt(pkey(y+" "+sfx[r]+" "+tier(+o)),d):null)??valAt(pkey(y+" "+sfx[r]),d);if(v)pv[own[k]]=(pv[own[k]]||0)+v}
+  for(const rid in ROSW[lg][w]){let t=0;for(const sid of ROSW[lg][w][rid]){const v=valAt(pkey(NAME[sid]||""),d);if(v)t+=v}
+   (teams[rid]=teams[rid]||[]).push(Math.round(t+(pv[rid]||0)));(picks[rid]=picks[rid]||[]).push(Math.round(pv[rid]||0))}}
+ race[lg]={weeks:wks,dates,teams,picks}}
+wr("data/value-race.json",{t:Date.now(),src:"expert values (DynastyProcess) on each week's rosters plus the picks each team owned that week",race});
 wr("data/predictions.json",PRED);wr("data/grades.json",G);wr("data/model.json",MODEL);wr("data/h2h.json",H2H);
 pr("graded",gAll.length,"games",ssAll.length,"calls",trades.length,"trades","model",JSON.stringify({sdK,bias}),"alerts",alerts.length);
